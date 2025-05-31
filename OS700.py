@@ -19,7 +19,6 @@ from chamados import (
     add_chamado,
     get_chamado_by_protocolo,
     list_chamados,
-    list_chamados_em_aberto,
     buscar_no_inventario_por_patrimonio,
     finalizar_chamado,
     calculate_working_hours,
@@ -28,7 +27,6 @@ from chamados import (
 from inventario import (
     show_inventory_list,
     cadastro_maquina,
-    get_machines_from_inventory,
     dashboard_inventario,
 )
 from ubs import get_ubs_list
@@ -50,13 +48,18 @@ st.set_page_config(
     layout="wide",
 )
 
-# ==================== Cabeçalho (logo + título) como antes ====================
+# ==================== Cabeçalho (logo + título) centralizado ====================
 logo_path = os.getenv("LOGO_PATH", "infocustec.png")
-if os.path.exists(logo_path):
-    st.image(logo_path, width=300)
-else:
-    st.warning("Logotipo não encontrado.")
-st.title("Gestão de Parque de Informática - APS ITAPIPOCA")
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    if os.path.exists(logo_path):
+        st.image(logo_path, width=200)
+    else:
+        st.warning("Logotipo não encontrado.")
+    st.markdown(
+        "<h1 style='text-align: center; color: #1F2937;'>Gestão de Parque de Informática - APS ITAPIPOCA</h1>",
+        unsafe_allow_html=True,
+    )
 st.markdown("---")
 
 
@@ -399,17 +402,6 @@ def chamados_tecnicos_page():
             filter=True, sortable=True, resizable=True, wrapText=True
         )
         gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=10)
-        gb.configure_grid_options(
-            domLayout="normal",
-            getRowStyle="""
-            function(params) {
-                if (params.data.Atrasado) {
-                    return {'backgroundColor':'#FFE5E5'};
-                }
-                return null;
-            }
-            """,
-        )
         gridOptions = gb.build()
         AgGrid(
             df,
@@ -475,42 +467,45 @@ def chamados_tecnicos_page():
                 st.stop()
 
 
-# ==================== 6) Página de Inventário ====================
+# ==================== 5) Página de Inventário ====================
 def inventario_page():
     st.subheader("Inventário")
-    st.markdown("Gerencie seu inventário de máquinas de forma simples.")
+    st.markdown("Selecione um item abaixo para ver detalhes e editar.")
 
     tab1, tab2, tab3 = st.tabs(
         ["📋 Listar Inventário", "➕ Cadastrar Máquina", "📊 Dashboard Inventário"]
     )
     with tab1:
+        # Quando o usuário escolhe “Listar Inventário”, executamos direto o show_inventory_list(),
+        # que já exibe tabela + selectbox para “Detalhes / Edição” abaixo.
         show_inventory_list()
+
     with tab2:
         cadastro_maquina()
+
     with tab3:
         dashboard_inventario()
 
 
-# ==================== 7) Página de Estoque ====================
+# ==================== 6) Página de Estoque ====================
 def estoque_page():
     st.subheader("Estoque de Peças")
     st.markdown("Controle o estoque de peças de informática.")
 
-    tab1, tab2 = st.tabs(["🔍 Visualizar/Filtrar", "➕ Gerenciar Estoque"])
+    tab1, tab2 = st.tabs(["🔍 Visualizar Estoque", "➕ Gerenciar Estoque"])
     with tab1:
-        # Apenas exibe o DataFrame completo para visualização
         estoque_data = get_estoque() or []
         if estoque_data:
             df_estoque = pd.DataFrame(estoque_data)
             st.dataframe(df_estoque)
         else:
             st.info("Estoque vazio.")
+
     with tab2:
-        # Dentro dessa aba, mantemos o manage_estoque que já faz adicionar/editar/remover
         manage_estoque()
 
 
-# ==================== 8) Página de Administração ====================
+# ==================== 7) Página de Administração ====================
 def administracao_page():
     st.subheader("Administração")
     st.markdown("Gerencie usuários, UBSs e setores.")
@@ -552,7 +547,7 @@ def administracao_page():
             st.info("Nenhum usuário cadastrado.")
 
 
-# ==================== 9) Página de Relatórios ====================
+# ==================== 8) Página de Relatórios ====================
 def relatorios_page():
     st.subheader("Relatórios Completos")
     st.markdown("Filtre os chamados por período e UBS para ver estatísticas e gráficos.")
