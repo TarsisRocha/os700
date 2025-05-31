@@ -33,7 +33,7 @@ from inventario import (
 )
 from ubs import get_ubs_list
 from setores import get_setores_list
-from estoque import manage_estoque, get_estoque
+from estoque import manage_estoque, get_estoque  # get_estoque para puxar lista de peças
 
 # ==================== Configurações iniciais ====================
 FORTALEZA_TZ = pytz.timezone("America/Fortaleza")
@@ -50,18 +50,13 @@ st.set_page_config(
     layout="wide",
 )
 
-# ==================== Cabeçalho centralizado ====================
+# ==================== Cabeçalho (logo + título) como antes ====================
 logo_path = os.getenv("LOGO_PATH", "infocustec.png")
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    if os.path.exists(logo_path):
-        st.image(logo_path, width=120)
-    else:
-        st.warning("Logotipo não encontrado.")
-    st.markdown(
-        "<h1 style='text-align: center; color: #1F2937;'>Gestão de Parque de Informática - APS ITAPIPOCA</h1>",
-        unsafe_allow_html=True,
-    )
+if os.path.exists(logo_path):
+    st.image(logo_path, width=300)
+else:
+    st.warning("Logotipo não encontrado.")
+st.title("Gestão de Parque de Informática - APS ITAPIPOCA")
 st.markdown("---")
 
 
@@ -72,8 +67,7 @@ def build_menu():
     if is_admin(st.session_state["username"]):
         return [
             "Dashboard",
-            "Abrir Chamado",
-            "Buscar Chamado",
+            "Chamados",
             "Chamados Técnicos",
             "Inventário",
             "Estoque",
@@ -82,7 +76,7 @@ def build_menu():
             "Sair",
         ]
     else:
-        return ["Abrir Chamado", "Buscar Chamado", "Sair"]
+        return ["Chamados", "Sair"]
 
 
 # ==================== Menu horizontal ====================
@@ -93,7 +87,6 @@ selected = option_menu(
     icons=[
         "speedometer",
         "chat-left-text",
-        "search",
         "card-list",
         "clipboard-data",
         "box-seam",
@@ -211,107 +204,107 @@ def dashboard_page():
         st.info("Sem dados suficientes para tendência semanal.")
 
 
-# ==================== 3) Página de Abrir Chamado ====================
-def abrir_chamado_page():
-    st.subheader("Abrir Chamado Técnico")
-    st.markdown("Preencha os dados abaixo para abrir um novo chamado.")
+# ==================== 3) Página de Chamados (Abrir / Buscar) ====================
+def chamados_page():
+    st.subheader("Chamados")
+    st.markdown("Gerencie a abertura e a busca de chamados.")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        patrimonio = st.text_input("Número de Patrimônio (opcional)", placeholder="Ex.: 12345")
-        if patrimonio:
-            info = buscar_no_inventario_por_patrimonio(patrimonio)
-            if info:
-                st.write(f"Máquina: {info['tipo']} - {info['marca']} {info['modelo']}")
-                st.write(f"UBS: {info['localizacao']} | Setor: {info['setor']}")
-                ubs_selecionada = info["localizacao"]
-                setor = info["setor"]
-                machine_type = info["tipo"]
+    tab1, tab2 = st.tabs(["✅ Abrir Chamado", "🔍 Buscar Chamado"])
+
+    with tab1:
+        st.markdown("### Abrir Chamado Técnico")
+        col1, col2 = st.columns(2)
+        with col1:
+            patrimonio = st.text_input("Número de Patrimônio (opcional)", placeholder="Ex.: 12345")
+            if patrimonio:
+                info = buscar_no_inventario_por_patrimonio(patrimonio)
+                if info:
+                    st.write(f"Máquina: {info['tipo']} - {info['marca']} {info['modelo']}")
+                    st.write(f"UBS: {info['localizacao']} | Setor: {info['setor']}")
+                    ubs_selecionada = info["localizacao"]
+                    setor = info["setor"]
+                    machine_type = info["tipo"]
+                else:
+                    st.error("Patrimônio não encontrado.")
+                    st.stop()
             else:
-                st.error("Patrimônio não encontrado.")
-                st.stop()
+                ubs_selecionada = st.selectbox("UBS", get_ubs_list())
+                setor = st.selectbox("Setor", get_setores_list())
+                machine_type = st.selectbox("Tipo de Máquina", ["Computador", "Impressora", "Outro"])
+
+        with col2:
+            data_agendada = st.date_input("Data Agendada (opcional)")
+            st.write("")
+
+        if machine_type == "Computador":
+            defect_options = [
+                "Computador não liga",
+                "Computador lento",
+                "Tela azul",
+                "Sistema travando",
+                "Erro de disco",
+                "Problema com atualização",
+                "Desligamento inesperado",
+                "Problema com internet",
+                "Problema com Wi-Fi",
+                "Sem conexão de rede",
+                "Mouse não funciona",
+                "Teclado não funciona",
+            ]
+        elif machine_type == "Impressora":
+            defect_options = [
+                "Impressora não imprime",
+                "Impressão borrada",
+                "Toner vazio",
+                "Troca de toner",
+                "Papel enroscado",
+                "Erro de conexão com a impressora",
+            ]
         else:
-            ubs_selecionada = st.selectbox("UBS", get_ubs_list())
-            setor = st.selectbox("Setor", get_setores_list())
-            machine_type = st.selectbox("Tipo de Máquina", ["Computador", "Impressora", "Outro"])
+            defect_options = ["Solicitação geral de suporte", "Outro"]
 
-    with col2:
-        data_agendada = st.date_input("Data Agendada (opcional)")
-        st.write("")
+        tipo_defeito = st.selectbox("Tipo de Defeito/Solicitação", defect_options)
+        problema = st.text_area(
+            "Descreva o problema ou solicitação",
+            placeholder="Explique em detalhes...",
+            height=120,
+        )
 
-    if machine_type == "Computador":
-        defect_options = [
-            "Computador não liga",
-            "Computador lento",
-            "Tela azul",
-            "Sistema travando",
-            "Erro de disco",
-            "Problema com atualização",
-            "Desligamento inesperado",
-            "Problema com internet",
-            "Problema com Wi-Fi",
-            "Sem conexão de rede",
-            "Mouse não funciona",
-            "Teclado não funciona",
-        ]
-    elif machine_type == "Impressora":
-        defect_options = [
-            "Impressora não imprime",
-            "Impressão borrada",
-            "Toner vazio",
-            "Troca de toner",
-            "Papel enroscado",
-            "Erro de conexão com a impressora",
-        ]
-    else:
-        defect_options = ["Solicitação geral de suporte", "Outro"]
-
-    tipo_defeito = st.selectbox("Tipo de Defeito/Solicitação", defect_options)
-    problema = st.text_area(
-        "Descreva o problema ou solicitação",
-        placeholder="Explique em detalhes...",
-        height=120,
-    )
-
-    if st.button("Abrir Chamado"):
-        if problema.strip() == "":
-            st.error("Descreva o problema antes de enviar.")
-        else:
-            agendamento_str = data_agendada.strftime("%d/%m/%Y") if data_agendada else None
-            protocolo = add_chamado(
-                st.session_state["username"],
-                ubs_selecionada,
-                setor,
-                tipo_defeito,
-                problema + (f" | Agendamento: {agendamento_str}" if agendamento_str else ""),
-                patrimonio=patrimonio,
-            )
-            if protocolo:
-                st.success(f"Chamado aberto com sucesso! Protocolo: {protocolo}")
+        if st.button("Abrir Chamado"):
+            if problema.strip() == "":
+                st.error("Descreva o problema antes de enviar.")
             else:
-                st.error("Erro ao abrir chamado.")
+                agendamento_str = data_agendada.strftime("%d/%m/%Y") if data_agendada else None
+                protocolo = add_chamado(
+                    st.session_state["username"],
+                    ubs_selecionada,
+                    setor,
+                    tipo_defeito,
+                    problema + (f" | Agendamento: {agendamento_str}" if agendamento_str else ""),
+                    patrimonio=patrimonio,
+                )
+                if protocolo:
+                    st.success(f"Chamado aberto com sucesso! Protocolo: {protocolo}")
+                else:
+                    st.error("Erro ao abrir chamado.")
 
-
-# ==================== 4) Página de Buscar Chamado ====================
-def buscar_chamado_page():
-    st.subheader("Buscar Chamado")
-    st.markdown("Informe o número de protocolo para localizar o chamado.")
-
-    protocolo = st.text_input("Número do Protocolo", placeholder="Digite o protocolo ex.: 1024")
-    if st.button("Buscar"):
-        if not protocolo.strip():
-            st.warning("Informe um protocolo válido.")
-        else:
-            chamado = get_chamado_by_protocolo(protocolo)
-            if chamado:
-                st.write("Chamado encontrado:")
-                exibir_chamado(chamado)
+    with tab2:
+        st.markdown("### Buscar Chamado")
+        protocolo = st.text_input("Número do Protocolo", placeholder="Digite o protocolo ex.: 1024")
+        if st.button("Buscar"):
+            if not protocolo.strip():
+                st.warning("Informe um protocolo válido.")
             else:
-                st.error("Chamado não encontrado.")
+                chamado = get_chamado_by_protocolo(protocolo)
+                if chamado:
+                    st.write("Chamado encontrado:")
+                    exibir_chamado(chamado)
+                else:
+                    st.error("Chamado não encontrado.")
 
 
 def exibir_chamado(chamado: dict):
-    st.markdown("### Detalhes do Chamado")
+    st.markdown("#### Detalhes do Chamado")
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(f"**ID:** {chamado.get('id', 'N/A')}")
@@ -329,10 +322,10 @@ def exibir_chamado(chamado: dict):
         st.markdown(chamado["solucao"])
 
 
-# ==================== 5) Página de Chamados Técnicos ====================
+# ==================== 4) Página de Chamados Técnicos ====================
 def chamados_tecnicos_page():
     st.subheader("Chamados Técnicos")
-    st.markdown("Aqui você pode ver todos os chamados, finalizar ou reabrir.")
+    st.markdown("Painel para visualizar, finalizar ou reabrir chamados técnicos.")
 
     with st.spinner("Carregando chamados..."):
         chamados = list_chamados() or []
@@ -392,15 +385,19 @@ def chamados_tecnicos_page():
     tab1, tab2, tab3 = st.tabs(["📋 Lista", "✅ Finalizar", "🔄 Reabrir"])
 
     with tab1:
-        st.markdown("### Lista de Chamados")
+        st.markdown("### Lista de Chamados Técnicos")
         gb = GridOptionsBuilder.from_dataframe(df)
-        gb.configure_column("Protocolo Exibido", header_name="Protocolo", width=120, tooltipField="protocolo")
+        gb.configure_column(
+            "Protocolo Exibido", header_name="Protocolo", width=120, tooltipField="protocolo"
+        )
         gb.configure_column("ubs", header_name="UBS", width=150)
         gb.configure_column("setor", header_name="Setor", width=150)
         gb.configure_column("tipo_defeito", header_name="Tipo de Defeito", width=200)
         gb.configure_column("Tempo Desde Abertura", header_name="Tempo", width=150)
         gb.configure_column("Atrasado", hide=True)
-        gb.configure_default_column(filter=True, sortable=True, resizable=True, wrapText=True)
+        gb.configure_default_column(
+            filter=True, sortable=True, resizable=True, wrapText=True
+        )
         gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=10)
         gb.configure_grid_options(
             domLayout="normal",
@@ -414,10 +411,16 @@ def chamados_tecnicos_page():
             """,
         )
         gridOptions = gb.build()
-        AgGrid(df, gridOptions=gridOptions, theme="streamlit", height=300, fit_columns_on_grid_load=True)
+        AgGrid(
+            df,
+            gridOptions=gridOptions,
+            theme="streamlit",
+            height=300,
+            fit_columns_on_grid_load=True,
+        )
 
     with tab2:
-        st.markdown("### Finalizar Chamado")
+        st.markdown("### Finalizar Chamado Técnico")
         df_abertos = df[df["aberto"]].copy()
         if df_abertos.empty:
             st.info("Nenhum chamado aberto para finalizar.")
@@ -434,18 +437,22 @@ def chamados_tecnicos_page():
                 st.write(f"**Abertura:** {cham['hora_abertura']}")
             st.markdown("---")
             sol = st.text_area("Solução", placeholder="Descreva a solução", height=100)
-            pecas = st.text_input("Peças (separadas por vírgula)", placeholder="Ex.: Toner HP, Cabo USB")
+            # Pegando lista de peças do estoque
+            estoque_data = get_estoque() or []
+            pieces_list = [item["nome"] for item in estoque_data]
+            pecas_selecionadas = st.multiselect(
+                "Selecione as peças utilizadas (se houver)", pieces_list
+            )
             if st.button("Finalizar"):
                 if not sol.strip():
                     st.error("Informe a solução.")
                 else:
-                    lista_pecas = [p.strip() for p in pecas.split(",") if p.strip()]
-                    finalizar_chamado(cham["id"], sol, pecas_usadas=lista_pecas)
+                    finalizar_chamado(cham["id"], sol, pecas_usadas=pecas_selecionadas)
                     st.success(f"Chamado {cham['protocolo']} finalizado!")
                     st.stop()
 
     with tab3:
-        st.markdown("### Reabrir Chamado")
+        st.markdown("### Reabrir Chamado Técnico")
         df_fechados = df[~df["aberto"]].copy()
         if df_fechados.empty:
             st.info("Nenhum chamado fechado para reabrir.")
@@ -477,13 +484,10 @@ def inventario_page():
         ["📋 Listar Inventário", "➕ Cadastrar Máquina", "📊 Dashboard Inventário"]
     )
     with tab1:
-        st.write("")
         show_inventory_list()
     with tab2:
-        st.write("")
         cadastro_maquina()
     with tab3:
-        st.write("")
         dashboard_inventario()
 
 
@@ -491,7 +495,19 @@ def inventario_page():
 def estoque_page():
     st.subheader("Estoque de Peças")
     st.markdown("Controle o estoque de peças de informática.")
-    manage_estoque()
+
+    tab1, tab2 = st.tabs(["🔍 Visualizar/Filtrar", "➕ Gerenciar Estoque"])
+    with tab1:
+        # Apenas exibe o DataFrame completo para visualização
+        estoque_data = get_estoque() or []
+        if estoque_data:
+            df_estoque = pd.DataFrame(estoque_data)
+            st.dataframe(df_estoque)
+        else:
+            st.info("Estoque vazio.")
+    with tab2:
+        # Dentro dessa aba, mantemos o manage_estoque que já faz adicionar/editar/remover
+        manage_estoque()
 
 
 # ==================== 8) Página de Administração ====================
@@ -499,12 +515,12 @@ def administracao_page():
     st.subheader("Administração")
     st.markdown("Gerencie usuários, UBSs e setores.")
 
-    admin_option = st.selectbox(
-        "Opções de Administração",
-        ["Cadastro de Usuário", "Gerenciar UBSs", "Gerenciar Setores", "Lista de Usuários"],
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["👤 Cadastro de Usuário", "🏥 Gerenciar UBSs", "🏢 Gerenciar Setores", "📜 Lista de Usuários"]
     )
 
-    if admin_option == "Cadastro de Usuário":
+    with tab1:
+        st.markdown("### Cadastro de Usuário")
         novo_user = st.text_input("Novo Usuário", placeholder="Digite o username")
         nova_senha = st.text_input("Senha", type="password", placeholder="Digite a senha")
         admin_flag = st.checkbox("Administrador")
@@ -517,15 +533,18 @@ def administracao_page():
             else:
                 st.error("Preencha username e senha.")
 
-    elif admin_option == "Gerenciar UBSs":
+    with tab2:
+        st.markdown("### Gerenciar UBSs")
         from ubs import manage_ubs
         manage_ubs()
 
-    elif admin_option == "Gerenciar Setores":
+    with tab3:
+        st.markdown("### Gerenciar Setores")
         from setores import manage_setores
         manage_setores()
 
-    elif admin_option == "Lista de Usuários":
+    with tab4:
+        st.markdown("### Lista de Usuários")
         usuarios = list_users()
         if usuarios:
             st.table(usuarios)
@@ -655,11 +674,8 @@ if selected == "Login":
 elif selected == "Dashboard":
     dashboard_page()
 
-elif selected == "Abrir Chamado":
-    abrir_chamado_page()
-
-elif selected == "Buscar Chamado":
-    buscar_chamado_page()
+elif selected == "Chamados":
+    chamados_page()
 
 elif selected == "Chamados Técnicos":
     chamados_tecnicos_page()
