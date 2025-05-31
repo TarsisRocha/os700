@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 import pytz
-from PIL import Image
 from st_aggrid import AgGrid, GridOptionsBuilder
 from streamlit_option_menu import option_menu
 import plotly.express as px
@@ -37,13 +36,9 @@ from setores import get_setores_list
 from estoque import manage_estoque, get_estoque
 
 # ==================== Configurações iniciais ====================
-# Fuso horário de Fortaleza (UTC−3)
 FORTALEZA_TZ = pytz.timezone("America/Fortaleza")
-
-# Configuração de logging
 logging.basicConfig(level=logging.INFO)
 
-# Inicialização do estado de sessão (login)
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
     st.session_state["username"] = ""
@@ -72,9 +67,6 @@ st.markdown("---")
 
 # ==================== Função build_menu ====================
 def build_menu():
-    """
-    Monta a lista de opções do menu com base no estado de login e permissão.
-    """
     if not st.session_state["logged_in"]:
         return ["Login"]
     if is_admin(st.session_state["username"]):
@@ -93,7 +85,7 @@ def build_menu():
         return ["Abrir Chamado", "Buscar Chamado", "Sair"]
 
 
-# ==================== Renderização do menu horizontal ====================
+# ==================== Menu horizontal ====================
 menu_options = build_menu()
 selected = option_menu(
     menu_title=None,
@@ -142,7 +134,7 @@ def login_page():
             st.success(f"Bem-vindo, {usuario}!")
             st.session_state["logged_in"] = True
             st.session_state["username"] = usuario
-            st.experimental_rerun()
+            st.stop()
         else:
             st.error("Usuário ou senha incorretos.")
 
@@ -173,7 +165,6 @@ def dashboard_page():
     c3.metric("Fechados", fechados)
     st.markdown("---")
 
-    # Identifica chamados atrasados (> 24h úteis)
     atrasados = []
     for c in chamados:
         if c.get("hora_fechamento") is None:
@@ -187,7 +178,6 @@ def dashboard_page():
     if atrasados:
         st.warning(f"Atenção: {len(atrasados)} chamados abertos há mais de 24h úteis!")
 
-    # Tendência Mensal
     df["mes"] = df["hora_abertura_dt"].dt.to_period("M").astype(str)
     tendencia_mensal = df.groupby("mes").size().reset_index(name="qtd_mensal")
     st.markdown("### Tendência de Chamados por Mês")
@@ -199,7 +189,6 @@ def dashboard_page():
     else:
         st.info("Sem dados suficientes para tendência mensal.")
 
-    # Tendência Semanal
     df["semana"] = df["hora_abertura_dt"].dt.to_period("W").astype(str)
     tendencia_semanal = df.groupby("semana").size().reset_index(name="qtd_semanal")
 
@@ -248,7 +237,7 @@ def abrir_chamado_page():
 
     with col2:
         data_agendada = st.date_input("Data Agendada (opcional)")
-        st.write("")  # Espaço para balancear layout
+        st.write("")
 
     if machine_type == "Computador":
         defect_options = [
@@ -322,9 +311,6 @@ def buscar_chamado_page():
 
 
 def exibir_chamado(chamado: dict):
-    """
-    Exibe detalhes do chamado de forma organizada.
-    """
     st.markdown("### Detalhes do Chamado")
     col1, col2 = st.columns(2)
     with col1:
@@ -346,13 +332,13 @@ def exibir_chamado(chamado: dict):
 # ==================== 5) Página de Chamados Técnicos ====================
 def chamados_tecnicos_page():
     st.subheader("Chamados Técnicos")
-    st.markdown("Painel para visualizar, finalizar ou reabrir chamados.")
+    st.markdown("Aqui você pode ver todos os chamados, finalizar ou reabrir.")
 
     with st.spinner("Carregando chamados..."):
         chamados = list_chamados() or []
 
     if not chamados:
-        st.info("Não há chamados registrados.")
+        st.info("Nenhum chamado registrado.")
         return
 
     df = pd.DataFrame(chamados)
@@ -361,49 +347,38 @@ def chamados_tecnicos_page():
     )
     df["aberto"] = df["hora_fechamento"].isnull()
 
-    # 1) Adiciona coluna "Tempo Desde Abertura" e indicador de atraso
+    # Tempo desde abertura e sinalização de atraso
     now = datetime.now(FORTALEZA_TZ)
-    tempos = []
-    atrasados = []
-    protocolos_display = []
-    for idx, row in df.iterrows():
+    tempos, atrasados, protoc_display = [], [], []
+    for _, row in df.iterrows():
         if row["aberto"]:
             try:
-                abertura = row["hora_abertura_dt"]
-                # Cálculo do tempo útil até agora
-                util = calculate_working_hours(abertura, now)
-                seg_total = int(util.total_seconds())
-                dias = seg_total // 86400
-                horas = (seg_total % 86400) // 3600
-                minutos = (seg_total % 3600) // 60
-                if dias > 0:
-                    tempo_str = f"{dias}d {horas}h"
-                elif horas > 0:
-                    tempo_str = f"{horas}h {minutos}m"
-                else:
-                    tempo_str = f"{minutos}m"
+                util = calculate_working_hours(row["hora_abertura_dt"], now)
+                seg = int(util.total_seconds())
+                h = seg // 3600
+                m = (seg % 3600) // 60
+                tempo_str = f"{h}h {m}m" if h else f"{m}m"
                 tempos.append(tempo_str)
-                # Verifica atraso (>24h úteis)
                 if util > timedelta(hours=24):
                     atrasados.append(True)
-                    protocolos_display.append(f"⚠️ {row['protocolo']}")
+                    protoc_display.append(f"⚠️ {row['protocolo']}")
                 else:
                     atrasados.append(False)
-                    protocolos_display.append(str(row["protocolo"]))
+                    protoc_display.append(str(row["protocolo"]))
             except:
                 tempos.append("Erro")
                 atrasados.append(False)
-                protocolos_display.append(str(row["protocolo"]))
+                protoc_display.append(str(row["protocolo"]))
         else:
             tempos.append("-")
             atrasados.append(False)
-            protocolos_display.append(str(row["protocolo"]))
+            protoc_display.append(str(row["protocolo"]))
 
     df["Tempo Desde Abertura"] = tempos
     df["Atrasado"] = atrasados
-    df["Protocolo Exibido"] = protocolos_display
+    df["Protocolo Exibido"] = protoc_display
 
-    # 2) Métricas resumidas
+    # Métricas rápidas
     total = len(df)
     abertos = int(df["aberto"].sum())
     fechados = total - abertos
@@ -413,178 +388,84 @@ def chamados_tecnicos_page():
     c3.metric("Chamados Fechados", fechados)
     st.markdown("---")
 
-    # 3) Separação em painéis: Chamados Abertos / Chamados Fechados
-    st.markdown("## Chamados Abertos")
-    df_abertos = df[df["aberto"]].copy()
-    if not df_abertos.empty:
-        _render_tabela_abertos(df_abertos)
-    else:
-        st.info("Nenhum chamado em aberto.")
+    # Abas: Lista, Finalizar, Reabrir
+    tab1, tab2, tab3 = st.tabs(["📋 Lista", "✅ Finalizar", "🔄 Reabrir"])
 
-    st.markdown("---")
-    st.markdown("## Chamados Fechados")
-    df_fechados = df[~df["aberto"]].copy()
-    if not df_fechados.empty:
-        _render_tabela_fechados(df_fechados)
-    else:
-        st.info("Nenhum chamado fechado.")
-
-    # 4) Formulário para finalizar ou reabrir dentro de cada painel – exemplo de controles rápidos
-    st.markdown("---")
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        st.markdown("### Finalizar Chamado")
-        _form_finalizar_chamado(df_abertos)
-    with col_f2:
-        st.markdown("### Reabrir Chamado")
-        _form_reabrir_chamado(df_fechados)
-
-
-def _render_tabela_abertos(df_abertos: pd.DataFrame):
-    """
-    Exibe a tabela de chamados abertos com destaque para 'Protocolo Exibido', 'UBS', 'Setor',
-    'Tipo Defeito' e 'Tempo Desde Abertura'.
-    """
-    gb = GridOptionsBuilder.from_dataframe(df_abertos)
-    # Define colunas visíveis e cabeçalhos
-    gb.configure_column(
-        "Protocolo Exibido", header_name="Protocolo", width=120, tooltipField="protocolo"
-    )
-    gb.configure_column("ubs", header_name="UBS", width=150)
-    gb.configure_column("setor", header_name="Setor", width=150)
-    gb.configure_column("tipo_defeito", header_name="Tipo de Defeito", width=200)
-    gb.configure_column(
-        "Tempo Desde Abertura", header_name="Tempo Desde Abertura", width=150
-    )
-    # Destacar linhas atrasadas com fundo vermelho-claro
-    gb.configure_column(
-        "Atrasado",
-        hide=True
-    )
-    gb.configure_default_column(filter=True, sortable=True, resizable=True, wrapText=True)
-    gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=10)
-    gb.configure_grid_options(
-        domLayout="normal",
-        getRowStyle="""
-        function(params) {
-            if (params.data.Atrasado) {
-                return {'backgroundColor':'#FFE5E5'};
+    with tab1:
+        st.markdown("### Lista de Chamados")
+        gb = GridOptionsBuilder.from_dataframe(df)
+        gb.configure_column("Protocolo Exibido", header_name="Protocolo", width=120, tooltipField="protocolo")
+        gb.configure_column("ubs", header_name="UBS", width=150)
+        gb.configure_column("setor", header_name="Setor", width=150)
+        gb.configure_column("tipo_defeito", header_name="Tipo de Defeito", width=200)
+        gb.configure_column("Tempo Desde Abertura", header_name="Tempo", width=150)
+        gb.configure_column("Atrasado", hide=True)
+        gb.configure_default_column(filter=True, sortable=True, resizable=True, wrapText=True)
+        gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=10)
+        gb.configure_grid_options(
+            domLayout="normal",
+            getRowStyle="""
+            function(params) {
+                if (params.data.Atrasado) {
+                    return {'backgroundColor':'#FFE5E5'};
+                }
+                return null;
             }
-            return null;
-        }
-        """,
-    )
+            """,
+        )
+        gridOptions = gb.build()
+        AgGrid(df, gridOptions=gridOptions, theme="streamlit", height=300, fit_columns_on_grid_load=True)
 
-    gridOptions = gb.build()
-    AgGrid(
-        df_abertos,
-        gridOptions=gridOptions,
-        enable_enterprise_modules=False,
-        theme="streamlit",
-        height=300,
-        fit_columns_on_grid_load=True,
-    )
-
-
-def _render_tabela_fechados(df_fechados: pd.DataFrame):
-    """
-    Exibe a tabela de chamados fechados com colunas 'Protocolo', 'UBS', 'Setor',
-    'Tipo Defeito', 'Hora Abertura' e 'Hora Fechamento'.
-    """
-    df_fechados["Hora Abertura"] = df_fechados["hora_abertura"]
-    df_fechados["Hora Fechamento"] = df_fechados["hora_fechamento"]
-    gb = GridOptionsBuilder.from_dataframe(df_fechados)
-    gb.configure_column("protocolo", header_name="Protocolo", width=120)
-    gb.configure_column("ubs", header_name="UBS", width=150)
-    gb.configure_column("setor", header_name="Setor", width=150)
-    gb.configure_column("tipo_defeito", header_name="Tipo de Defeito", width=200)
-    gb.configure_column("Hora Abertura", header_name="Abertura", width=150)
-    gb.configure_column("Hora Fechamento", header_name="Fechamento", width=150)
-    gb.configure_default_column(filter=True, sortable=True, resizable=True, wrapText=True)
-    gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=10)
-    gb.configure_grid_options(domLayout="normal")
-
-    gridOptions = gb.build()
-    AgGrid(
-        df_fechados,
-        gridOptions=gridOptions,
-        enable_enterprise_modules=False,
-        theme="streamlit",
-        height=300,
-        fit_columns_on_grid_load=True,
-    )
-
-
-def _form_finalizar_chamado(df_abertos: pd.DataFrame):
-    """
-    Exibe formulário para finalizar apenas chamados abertos.
-    """
-    if df_abertos.empty:
-        st.write("Nenhum chamado disponível para finalizar.")
-        return
-
-    protocolo_sel = st.selectbox(
-        "Selecione Protocolo", df_abertos["protocolo"].tolist()
-    )
-    chamado = df_abertos[df_abertos["protocolo"] == protocolo_sel].iloc[0]
-
-    st.markdown("#### Detalhes do Chamado")
-    a1, a2 = st.columns(2)
-    with a1:
-        st.write(f"**ID:** {chamado['id']}")
-        st.write(f"**UBS:** {chamado['ubs']}")
-        st.write(f"**Setor:** {chamado['setor']}")
-    with a2:
-        st.write(f"**Tipo Defeito:** {chamado['tipo_defeito']}")
-        st.write(f"**Abertura:** {chamado['hora_abertura']}")
-
-    st.markdown("---")
-    solucao = st.text_area(
-        "Solução Aplicada", placeholder="Descreva em detalhes o que foi feito", height=100
-    )
-    pecas = st.text_input(
-        "Peças Utilizadas (separadas por vírgula)", placeholder="Ex.: Toner HP, Cabo USB"
-    )
-
-    if st.button("Finalizar Chamado"):
-        if not solucao.strip():
-            st.error("Informe a solução antes de finalizar.")
+    with tab2:
+        st.markdown("### Finalizar Chamado")
+        df_abertos = df[df["aberto"]].copy()
+        if df_abertos.empty:
+            st.info("Nenhum chamado aberto para finalizar.")
         else:
-            pecas_lista = [p.strip() for p in pecas.split(",") if p.strip()]
-            finalizar_chamado(chamado["id"], solucao, pecas_usadas=pecas_lista)
-            st.success(f"Chamado {chamado['protocolo']} finalizado com sucesso!")
-            st.experimental_rerun()
+            sel = st.selectbox("Selecione Protocolo", df_abertos["protocolo"].tolist())
+            cham = df_abertos[df_abertos["protocolo"] == sel].iloc[0]
+            cA, cB = st.columns(2)
+            with cA:
+                st.write(f"**ID:** {cham['id']}")
+                st.write(f"**UBS:** {cham['ubs']}")
+                st.write(f"**Setor:** {cham['setor']}")
+            with cB:
+                st.write(f"**Tipo:** {cham['tipo_defeito']}")
+                st.write(f"**Abertura:** {cham['hora_abertura']}")
+            st.markdown("---")
+            sol = st.text_area("Solução", placeholder="Descreva a solução", height=100)
+            pecas = st.text_input("Peças (separadas por vírgula)", placeholder="Ex.: Toner HP, Cabo USB")
+            if st.button("Finalizar"):
+                if not sol.strip():
+                    st.error("Informe a solução.")
+                else:
+                    lista_pecas = [p.strip() for p in pecas.split(",") if p.strip()]
+                    finalizar_chamado(cham["id"], sol, pecas_usadas=lista_pecas)
+                    st.success(f"Chamado {cham['protocolo']} finalizado!")
+                    st.stop()
 
-
-def _form_reabrir_chamado(df_fechados: pd.DataFrame):
-    """
-    Exibe formulário para reabrir apenas chamados fechados.
-    """
-    if df_fechados.empty:
-        st.write("Nenhum chamado disponível para reabrir.")
-        return
-
-    protocolo_sel = st.selectbox(
-        "Selecione Protocolo", df_fechados["protocolo"].tolist()
-    )
-    chamado = df_fechados[df_fechados["protocolo"] == protocolo_sel].iloc[0]
-
-    st.markdown("#### Detalhes do Chamado")
-    b1, b2 = st.columns(2)
-    with b1:
-        st.write(f"**ID:** {chamado['id']}")
-        st.write(f"**UBS:** {chamado['ubs']}")
-        st.write(f"**Setor:** {chamado['setor']}")
-    with b2:
-        st.write(f"**Tipo Defeito:** {chamado['tipo_defeito']}")
-        st.write(f"**Abertura:** {chamado['hora_abertura']}")
-        st.write(f"**Fechamento:** {chamado['hora_fechamento']}")
-
-    remover = st.checkbox("Remover histórico de manutenção associado?", value=False)
-    if st.button("Reabrir Chamado"):
-        reabrir_chamado(chamado["id"], remover_historico=remover)
-        st.success(f"Chamado {chamado['protocolo']} reaberto com sucesso!")
-        st.experimental_rerun()
+    with tab3:
+        st.markdown("### Reabrir Chamado")
+        df_fechados = df[~df["aberto"]].copy()
+        if df_fechados.empty:
+            st.info("Nenhum chamado fechado para reabrir.")
+        else:
+            sel = st.selectbox("Selecione Protocolo", df_fechados["protocolo"].tolist())
+            cham = df_fechados[df_fechados["protocolo"] == sel].iloc[0]
+            cA, cB = st.columns(2)
+            with cA:
+                st.write(f"**ID:** {cham['id']}")
+                st.write(f"**UBS:** {cham['ubs']}")
+                st.write(f"**Setor:** {cham['setor']}")
+            with cB:
+                st.write(f"**Tipo:** {cham['tipo_defeito']}")
+                st.write(f"**Abertura:** {cham['hora_abertura']}")
+                st.write(f"**Fechamento:** {cham['hora_fechamento']}")
+            remover = st.checkbox("Remover histórico associado?", value=False)
+            if st.button("Reabrir"):
+                reabrir_chamado(cham["id"], remover_historico=remover)
+                st.success(f"Chamado {cham['protocolo']} reaberto!")
+                st.stop()
 
 
 # ==================== 6) Página de Inventário ====================
@@ -655,7 +536,7 @@ def administracao_page():
 # ==================== 9) Página de Relatórios ====================
 def relatorios_page():
     st.subheader("Relatórios Completos")
-    st.markdown("Filtro de chamados por período e UBS.")
+    st.markdown("Filtre os chamados por período e UBS para ver estatísticas e gráficos.")
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -681,6 +562,7 @@ def relatorios_page():
     df["hora_abertura_dt"] = pd.to_datetime(
         df["hora_abertura"], format="%d/%m/%Y %H:%M:%S", errors="coerce"
     )
+
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_dt = datetime.combine(end_date, datetime.max.time())
     df_period = df[(df["hora_abertura_dt"] >= start_dt) & (df["hora_abertura_dt"] <= end_dt)]
@@ -699,7 +581,6 @@ def relatorios_page():
     st.markdown(f"**Chamados Abertos (período):** {abertos}")
     st.markdown(f"**Chamados Fechados (período):** {fechados}")
 
-    # Cálculo do tempo médio de resolução
     def tempo_resolucao(row):
         if pd.notnull(row["hora_fechamento"]):
             try:
@@ -720,6 +601,51 @@ def relatorios_page():
         st.markdown(f"**Tempo Médio de Resolução (horas úteis):** {horas}h {minutos}m")
     else:
         st.write("Nenhum chamado finalizado no período para calcular tempo médio.")
+
+    st.markdown("---")
+    if "tipo_defeito" in df_period.columns:
+        chamados_tipo = df_period.groupby("tipo_defeito").size().reset_index(name="qtd")
+        st.markdown("#### Chamados por Tipo de Defeito")
+        st.dataframe(chamados_tipo)
+        fig_tipo = px.bar(
+            chamados_tipo,
+            x="tipo_defeito",
+            y="qtd",
+            title="Chamados por Tipo de Defeito",
+            labels={"tipo_defeito": "Tipo de Defeito", "qtd": "Quantidade"},
+        )
+        st.plotly_chart(fig_tipo, use_container_width=True)
+
+    st.markdown("---")
+    if "ubs" in df_period.columns and "setor" in df_period.columns:
+        chamados_ubs_setor = df_period.groupby(["ubs", "setor"]).size().reset_index(name="qtd_chamados")
+        st.markdown("#### Chamados por UBS e Setor")
+        st.dataframe(chamados_ubs_setor)
+
+    st.markdown("---")
+    if not df_period.empty:
+        df_period["dia_semana_en"] = df_period["hora_abertura_dt"].dt.day_name()
+        day_map = {
+            "Monday": "Segunda-feira",
+            "Tuesday": "Terça-feira",
+            "Wednesday": "Quarta-feira",
+            "Thursday": "Quinta-feira",
+            "Friday": "Sexta-feira",
+            "Saturday": "Sábado",
+            "Sunday": "Domingo",
+        }
+        df_period["dia_semana_pt"] = df_period["dia_semana_en"].map(day_map)
+        chamados_dia = df_period.groupby("dia_semana_pt").size().reset_index(name="qtd")
+        st.markdown("#### Chamados por Dia da Semana")
+        st.table(chamados_dia)
+        fig_dia = px.bar(
+            chamados_dia,
+            x="dia_semana_pt",
+            y="qtd",
+            title="Chamados por Dia da Semana",
+            labels={"dia_semana_pt": "Dia da Semana", "qtd": "Quantidade"},
+        )
+        st.plotly_chart(fig_dia, use_container_width=True)
 
 
 # ==================== Roteamento das páginas ====================
@@ -754,7 +680,7 @@ elif selected == "Sair":
     st.session_state["logged_in"] = False
     st.session_state["username"] = ""
     st.success("Você saiu com sucesso. Até breve!")
-    st.experimental_rerun()
+    st.stop()
 
 else:
     st.info("Selecione uma opção no menu acima.")
