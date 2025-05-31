@@ -10,4 +10,5 @@ streamlit-chat
 pytz>=2021.1
 twilio
 plotly
+streamlit-card
 
