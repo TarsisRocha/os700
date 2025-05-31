@@ -12,6 +12,7 @@ import pytz
 from st_aggrid import AgGrid, GridOptionsBuilder
 from streamlit_option_menu import option_menu
 import plotly.express as px
+from streamlit_card import card  # pip install streamlit-card
 
 # ===== 3) Módulos internos =====
 from autenticacao import authenticate, add_user, is_admin, list_users
@@ -53,7 +54,7 @@ logo_path = os.getenv("LOGO_PATH", "infocustec.png")
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     if os.path.exists(logo_path):
-        st.image(logo_path, width=200)
+        st.image(logo_path, width=300)
     else:
         st.warning("Logotipo não encontrado.")
     st.markdown(
@@ -325,7 +326,7 @@ def exibir_chamado(chamado: dict):
         st.markdown(chamado["solucao"])
 
 
-# ==================== 4) Página de Chamados Técnicos ====================
+# ==================== 4) Página de Chamados Técnicos (com cartões) ====================
 def chamados_tecnicos_page():
     st.subheader("Chamados Técnicos")
     st.markdown("Painel para visualizar, finalizar ou reabrir chamados técnicos.")
@@ -343,40 +344,28 @@ def chamados_tecnicos_page():
     )
     df["aberto"] = df["hora_fechamento"].isnull()
 
-    # Tempo desde abertura e sinalização de atraso
+    # Tempo desde abertura
     now = datetime.now(FORTALEZA_TZ)
-    tempos, atrasados, protoc_display = [], [], []
-    for _, row in df.iterrows():
-        if row["aberto"]:
+    for chamado in chamados:
+        if chamado["hora_fechamento"] is None:
             try:
-                util = calculate_working_hours(row["hora_abertura_dt"], now)
+                abertura = datetime.strptime(chamado["hora_abertura"], "%d/%m/%Y %H:%M:%S")
+                util = calculate_working_hours(abertura, now)
                 seg = int(util.total_seconds())
                 h = seg // 3600
                 m = (seg % 3600) // 60
-                tempo_str = f"{h}h {m}m" if h else f"{m}m"
-                tempos.append(tempo_str)
-                if util > timedelta(hours=24):
-                    atrasados.append(True)
-                    protoc_display.append(f"⚠️ {row['protocolo']}")
-                else:
-                    atrasados.append(False)
-                    protoc_display.append(str(row["protocolo"]))
+                chamado["tempo_util"] = f"{h}h {m}m" if h else f"{m}m"
+                chamado["status"] = "Aberto"
             except:
-                tempos.append("Erro")
-                atrasados.append(False)
-                protoc_display.append(str(row["protocolo"]))
+                chamado["tempo_util"] = "-"
+                chamado["status"] = "Aberto"
         else:
-            tempos.append("-")
-            atrasados.append(False)
-            protoc_display.append(str(row["protocolo"]))
-
-    df["Tempo Desde Abertura"] = tempos
-    df["Atrasado"] = atrasados
-    df["Protocolo Exibido"] = protoc_display
+            chamado["tempo_util"] = "-"
+            chamado["status"] = "Fechado"
 
     # Métricas rápidas
-    total = len(df)
-    abertos = int(df["aberto"].sum())
+    total = len(chamados)
+    abertos = sum(1 for c in chamados if c["aberto"])
     fechados = total - abertos
     c1, c2, c3 = st.columns([1, 1, 1])
     c1.metric("Total de Chamados", total)
@@ -384,40 +373,31 @@ def chamados_tecnicos_page():
     c3.metric("Chamados Fechados", fechados)
     st.markdown("---")
 
-    # Abas: Lista, Finalizar, Reabrir
-    tab1, tab2, tab3 = st.tabs(["📋 Lista", "✅ Finalizar", "🔄 Reabrir"])
+    # Mostra cada chamado como um card
+    for chamado in chamados:
+        titulo = f"🔹 Protocolo {chamado['protocolo']} - {chamado['tipo_defeito']}"
+        texto = (
+            f"UBS: {chamado['ubs']}\n"
+            f"Setor: {chamado['setor']}\n"
+            f"Abertura: {chamado['hora_abertura']}\n"
+            f"Status: {chamado['status']}\n"
+            f"Tempo útil desde abertura: {chamado['tempo_util']}\n"
+            + (
+                f"Solução: {chamado['solucao']}\n" if chamado.get("solucao") else ""
+            )
+        )
+        card(title=titulo, text=texto, image="", key=chamado["protocolo"])
+
+    st.markdown("---")
+    st.markdown("### Ação nos Chamados")
+    tab1, tab2 = st.tabs(["✅ Finalizar Chamado", "🔄 Reabrir Chamado"])
 
     with tab1:
-        st.markdown("### Lista de Chamados Técnicos")
-        gb = GridOptionsBuilder.from_dataframe(df)
-        gb.configure_column(
-            "Protocolo Exibido", header_name="Protocolo", width=120, tooltipField="protocolo"
-        )
-        gb.configure_column("ubs", header_name="UBS", width=150)
-        gb.configure_column("setor", header_name="Setor", width=150)
-        gb.configure_column("tipo_defeito", header_name="Tipo de Defeito", width=200)
-        gb.configure_column("Tempo Desde Abertura", header_name="Tempo", width=150)
-        gb.configure_column("Atrasado", hide=True)
-        gb.configure_default_column(
-            filter=True, sortable=True, resizable=True, wrapText=True
-        )
-        gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=10)
-        gridOptions = gb.build()
-        AgGrid(
-            df,
-            gridOptions=gridOptions,
-            theme="streamlit",
-            height=300,
-            fit_columns_on_grid_load=True,
-        )
-
-    with tab2:
-        st.markdown("### Finalizar Chamado Técnico")
         df_abertos = df[df["aberto"]].copy()
         if df_abertos.empty:
             st.info("Nenhum chamado aberto para finalizar.")
         else:
-            sel = st.selectbox("Selecione Protocolo", df_abertos["protocolo"].tolist())
+            sel = st.selectbox("Selecione Protocolo para finalizar", df_abertos["protocolo"].tolist())
             cham = df_abertos[df_abertos["protocolo"] == sel].iloc[0]
             cA, cB = st.columns(2)
             with cA:
@@ -429,13 +409,12 @@ def chamados_tecnicos_page():
                 st.write(f"**Abertura:** {cham['hora_abertura']}")
             st.markdown("---")
             sol = st.text_area("Solução", placeholder="Descreva a solução", height=100)
-            # Pegando lista de peças do estoque
             estoque_data = get_estoque() or []
             pieces_list = [item["nome"] for item in estoque_data]
             pecas_selecionadas = st.multiselect(
                 "Selecione as peças utilizadas (se houver)", pieces_list
             )
-            if st.button("Finalizar"):
+            if st.button("Finalizar Chamado"):
                 if not sol.strip():
                     st.error("Informe a solução.")
                 else:
@@ -443,13 +422,12 @@ def chamados_tecnicos_page():
                     st.success(f"Chamado {cham['protocolo']} finalizado!")
                     st.stop()
 
-    with tab3:
-        st.markdown("### Reabrir Chamado Técnico")
+    with tab2:
         df_fechados = df[~df["aberto"]].copy()
         if df_fechados.empty:
             st.info("Nenhum chamado fechado para reabrir.")
         else:
-            sel = st.selectbox("Selecione Protocolo", df_fechados["protocolo"].tolist())
+            sel = st.selectbox("Selecione Protocolo para reabrir", df_fechados["protocolo"].tolist())
             cham = df_fechados[df_fechados["protocolo"] == sel].iloc[0]
             cA, cB = st.columns(2)
             with cA:
@@ -461,7 +439,7 @@ def chamados_tecnicos_page():
                 st.write(f"**Abertura:** {cham['hora_abertura']}")
                 st.write(f"**Fechamento:** {cham['hora_fechamento']}")
             remover = st.checkbox("Remover histórico associado?", value=False)
-            if st.button("Reabrir"):
+            if st.button("Reabrir Chamado"):
                 reabrir_chamado(cham["id"], remover_historico=remover)
                 st.success(f"Chamado {cham['protocolo']} reaberto!")
                 st.stop()
@@ -476,8 +454,6 @@ def inventario_page():
         ["📋 Listar Inventário", "➕ Cadastrar Máquina", "📊 Dashboard Inventário"]
     )
     with tab1:
-        # Quando o usuário escolhe “Listar Inventário”, executamos direto o show_inventory_list(),
-        # que já exibe tabela + selectbox para “Detalhes / Edição” abaixo.
         show_inventory_list()
 
     with tab2:
@@ -500,7 +476,6 @@ def estoque_page():
             st.dataframe(df_estoque)
         else:
             st.info("Estoque vazio.")
-
     with tab2:
         manage_estoque()
 
