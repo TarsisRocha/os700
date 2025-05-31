@@ -392,7 +392,12 @@ def chamados_tecnicos_page():
                 f"Solução: {chamado['solucao']}\n" if chamado.get("solucao") else ""
             )
         )
-        card(title=titulo, text=texto, image="", key=chamado["protocolo"])
+        card(
+            title=titulo,
+            text=texto,
+            image="",
+            key=str(chamado["protocolo"]),  # Certifique-se de converter para string
+        )
 
     st.markdown("---")
     st.markdown("### Ação nos Chamados")
@@ -517,11 +522,13 @@ def administracao_page():
     with tab2:
         st.markdown("### Gerenciar UBSs")
         from ubs import manage_ubs
+
         manage_ubs()
 
     with tab3:
         st.markdown("### Gerenciar Setores")
         from setores import manage_setores
+
         manage_setores()
 
     with tab4:
