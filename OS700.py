@@ -77,9 +77,17 @@ st.markdown(
 # Carrega (se existir) o logotipo
 logo_path = os.getenv("LOGO_PATH", "infocustec.png")
 if os.path.exists(logo_path):
-    st.image(logo_path, width=300)
+    st.markdown(
+        f"""
+        <div style="display: flex; justify-content: center; align-items: center; padding: 10px;">
+            <img src="data:image/png;base64,{open(logo_path, 'rb').read().encode('base64').decode()}" style="height:80px;" />
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 else:
     st.warning("Logotipo não encontrado.")
+
 
 st.title("Gestão de Parque de Informática - APS ITAPIPOCA")
 
