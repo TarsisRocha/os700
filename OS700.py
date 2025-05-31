@@ -219,7 +219,9 @@ def chamados_page():
         st.markdown("### Abrir Chamado Técnico")
         col1, col2 = st.columns(2)
         with col1:
-            patrimonio = st.text_input("Número de Patrimônio (opcional)", placeholder="Ex.: 12345")
+            patrimonio = st.text_input(
+                "Número de Patrimônio (opcional)", placeholder="Ex.: 12345"
+            )
             if patrimonio:
                 info = buscar_no_inventario_por_patrimonio(patrimonio)
                 if info:
@@ -294,7 +296,9 @@ def chamados_page():
 
     with tab2:
         st.markdown("### Buscar Chamado")
-        protocolo = st.text_input("Número do Protocolo", placeholder="Digite o protocolo ex.: 1024")
+        protocolo = st.text_input(
+            "Número do Protocolo", placeholder="Digite o protocolo ex.: 1024"
+        )
         if st.button("Buscar"):
             if not protocolo.strip():
                 st.warning("Informe um protocolo válido.")
@@ -338,16 +342,22 @@ def chamados_tecnicos_page():
         st.info("Nenhum chamado registrado.")
         return
 
+    # Monta DataFrame para calcular abertos/fechados
     df = pd.DataFrame(chamados)
     df["hora_abertura_dt"] = pd.to_datetime(
         df["hora_abertura"], format="%d/%m/%Y %H:%M:%S", errors="coerce"
     )
     df["aberto"] = df["hora_fechamento"].isnull()
 
-    # Tempo desde abertura
+    # Calcula quantos estão abertos/fechados
+    total = len(df)
+    abertos = int(df["aberto"].sum())
+    fechados = total - abertos
+
+    # Adiciona campos “tempo_util” e “status” a cada dicionário para exibição
     now = datetime.now(FORTALEZA_TZ)
     for chamado in chamados:
-        if chamado["hora_fechamento"] is None:
+        if chamado.get("hora_fechamento") is None:
             try:
                 abertura = datetime.strptime(chamado["hora_abertura"], "%d/%m/%Y %H:%M:%S")
                 util = calculate_working_hours(abertura, now)
@@ -355,25 +365,21 @@ def chamados_tecnicos_page():
                 h = seg // 3600
                 m = (seg % 3600) // 60
                 chamado["tempo_util"] = f"{h}h {m}m" if h else f"{m}m"
-                chamado["status"] = "Aberto"
             except:
                 chamado["tempo_util"] = "-"
-                chamado["status"] = "Aberto"
+            chamado["status"] = "Aberto"
         else:
             chamado["tempo_util"] = "-"
             chamado["status"] = "Fechado"
 
-    # Métricas rápidas
-    total = len(chamados)
-    abertos = sum(1 for c in chamados if c["aberto"])
-    fechados = total - abertos
+    # Mostra as métricas rápidas
     c1, c2, c3 = st.columns([1, 1, 1])
     c1.metric("Total de Chamados", total)
     c2.metric("Chamados Abertos", abertos)
     c3.metric("Chamados Fechados", fechados)
     st.markdown("---")
 
-    # Mostra cada chamado como um card
+    # Exibe cada chamado como um cartão (streamlit-card)
     for chamado in chamados:
         titulo = f"🔹 Protocolo {chamado['protocolo']} - {chamado['tipo_defeito']}"
         texto = (
@@ -393,11 +399,14 @@ def chamados_tecnicos_page():
     tab1, tab2 = st.tabs(["✅ Finalizar Chamado", "🔄 Reabrir Chamado"])
 
     with tab1:
+        # Usa DataFrame para filtrar apenas os abertos
         df_abertos = df[df["aberto"]].copy()
         if df_abertos.empty:
             st.info("Nenhum chamado aberto para finalizar.")
         else:
-            sel = st.selectbox("Selecione Protocolo para finalizar", df_abertos["protocolo"].tolist())
+            sel = st.selectbox(
+                "Selecione Protocolo para finalizar", df_abertos["protocolo"].tolist()
+            )
             cham = df_abertos[df_abertos["protocolo"] == sel].iloc[0]
             cA, cB = st.columns(2)
             with cA:
@@ -427,7 +436,9 @@ def chamados_tecnicos_page():
         if df_fechados.empty:
             st.info("Nenhum chamado fechado para reabrir.")
         else:
-            sel = st.selectbox("Selecione Protocolo para reabrir", df_fechados["protocolo"].tolist())
+            sel = st.selectbox(
+                "Selecione Protocolo para reabrir", df_fechados["protocolo"].tolist()
+            )
             cham = df_fechados[df_fechados["protocolo"] == sel].iloc[0]
             cA, cB = st.columns(2)
             with cA:
