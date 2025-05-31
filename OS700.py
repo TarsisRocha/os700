@@ -330,7 +330,7 @@ def exibir_chamado(chamado: dict):
         st.markdown(chamado["solucao"])
 
 
-# ==================== 4) Página de Chamados Técnicos (com cartões) ====================
+# ==================== 4) Página de Chamados Técnicos (com cards coloridos) ====================
 def chamados_tecnicos_page():
     st.subheader("Chamados Técnicos")
     st.markdown("Painel para visualizar, finalizar ou reabrir chamados técnicos.")
@@ -342,69 +342,147 @@ def chamados_tecnicos_page():
         st.info("Nenhum chamado registrado.")
         return
 
-    # Monta DataFrame para calcular abertos/fechados
+    # 1) Monta DataFrame para calcular abertos/fechados e determinar overdue
     df = pd.DataFrame(chamados)
     df["hora_abertura_dt"] = pd.to_datetime(
         df["hora_abertura"], format="%d/%m/%Y %H:%M:%S", errors="coerce"
     )
     df["aberto"] = df["hora_fechamento"].isnull()
 
-    # Calcula quantos estão abertos/fechados
-    total = len(df)
-    abertos = int(df["aberto"].sum())
-    fechados = total - abertos
-
-    # Adiciona campos “tempo_util” e “status” a cada dicionário para exibição
+    # 2) Calcula “tempo_util” e cria campo de timedelta para overdue
     now = datetime.now(FORTALEZA_TZ)
     for chamado in chamados:
         if chamado.get("hora_fechamento") is None:
             try:
                 abertura = datetime.strptime(chamado["hora_abertura"], "%d/%m/%Y %H:%M:%S")
                 util = calculate_working_hours(abertura, now)
+                chamado["util_timedelta"] = util
                 seg = int(util.total_seconds())
                 h = seg // 3600
                 m = (seg % 3600) // 60
                 chamado["tempo_util"] = f"{h}h {m}m" if h else f"{m}m"
             except:
+                chamado["util_timedelta"] = timedelta(0)
                 chamado["tempo_util"] = "-"
             chamado["status"] = "Aberto"
         else:
+            chamado["util_timedelta"] = timedelta(0)
             chamado["tempo_util"] = "-"
             chamado["status"] = "Fechado"
 
-    # Mostra as métricas rápidas
+    # 3) Categoriza em 3 listas: overdue, abertos, fechados
+    overdue = []
+    abertos = []
+    fechados = []
+    for chamado in chamados:
+        if chamado["status"] == "Aberto":
+            if chamado["util_timedelta"] > timedelta(hours=24):
+                overdue.append(chamado)
+            else:
+                abertos.append(chamado)
+        else:
+            fechados.append(chamado)
+
+    # 4) Exibe métricas
+    total = len(chamados)
+    qt_abertos = len(abertos) + len(overdue)
+    qt_fechados = len(fechados)
     c1, c2, c3 = st.columns([1, 1, 1])
     c1.metric("Total de Chamados", total)
-    c2.metric("Chamados Abertos", abertos)
-    c3.metric("Chamados Fechados", fechados)
+    c2.metric("Aberto (incl. overdue)", qt_abertos)
+    c3.metric("Fechados", qt_fechados)
     st.markdown("---")
 
-    # Exibe cada chamado como um cartão (streamlit-card)
-    for chamado in chamados:
-        titulo = f"🔹 Protocolo {chamado['protocolo']} - {chamado['tipo_defeito']}"
-        texto = (
-            f"UBS: {chamado['ubs']}\n"
-            f"Setor: {chamado['setor']}\n"
-            f"Abertura: {chamado['hora_abertura']}\n"
-            f"Status: {chamado['status']}\n"
-            f"Tempo útil desde abertura: {chamado['tempo_util']}\n"
-            + (
-                f"Solução: {chamado['solucao']}\n" if chamado.get("solucao") else ""
+    # 5) Seção “Overdue” (em vermelho)
+    if overdue:
+        st.markdown(
+            "<div style='background-color:#f8d7da; padding:8px; border-radius:4px;'>"
+            "<strong>❗ Chamados Overdue (abertos há mais de 24h úteis)</strong></div>",
+            unsafe_allow_html=True,
+        )
+        n_por_linha = 3
+        for idx, chamado in enumerate(overdue):
+            if idx % n_por_linha == 0:
+                cols = st.columns(n_por_linha)
+            titulo = f"🔴 Protocolo {chamado['protocolo']} – {chamado['tipo_defeito']}"
+            texto = (
+                f"UBS: {chamado['ubs']}\n"
+                f"Setor: {chamado['setor']}\n"
+                f"Abertura: {chamado['hora_abertura']}\n"
+                f"Status: {chamado['status']}\n"
+                f"Tempo útil: {chamado['tempo_util']}\n"
             )
-        )
-        card(
-            title=titulo,
-            text=texto,
-            image="",
-            key=str(chamado["protocolo"]),  # Certifique-se de converter para string
-        )
+            with cols[idx % n_por_linha]:
+                card(
+                    title=titulo,
+                    text=texto,
+                    image="",
+                    key=f"card_overdue_{chamado['protocolo']}",
+                )
+        st.markdown("---")
 
-    st.markdown("---")
+    # 6) Seção “Abertos” (em verde)
+    if abertos:
+        st.markdown(
+            "<div style='background-color:#d1e7dd; padding:8px; border-radius:4px;'>"
+            "<strong>🟢 Chamados Abertos (até 24h úteis)</strong></div>",
+            unsafe_allow_html=True,
+        )
+        n_por_linha = 3
+        for idx, chamado in enumerate(abertos):
+            if idx % n_por_linha == 0:
+                cols = st.columns(n_por_linha)
+            titulo = f"🟢 Protocolo {chamado['protocolo']} – {chamado['tipo_defeito']}"
+            texto = (
+                f"UBS: {chamado['ubs']}\n"
+                f"Setor: {chamado['setor']}\n"
+                f"Abertura: {chamado['hora_abertura']}\n"
+                f"Status: {chamado['status']}\n"
+                f"Tempo útil: {chamado['tempo_util']}\n"
+            )
+            with cols[idx % n_por_linha]:
+                card(
+                    title=titulo,
+                    text=texto,
+                    image="",
+                    key=f"card_aberto_{chamado['protocolo']}",
+                )
+        st.markdown("---")
+
+    # 7) Seção “Fechados” (em cinza)
+    if fechados:
+        st.markdown(
+            "<div style='background-color:#e2e3e5; padding:8px; border-radius:4px;'>"
+            "<strong>⚪ Chamados Fechados</strong></div>",
+            unsafe_allow_html=True,
+        )
+        n_por_linha = 3
+        for idx, chamado in enumerate(fechados):
+            if idx % n_por_linha == 0:
+                cols = st.columns(n_por_linha)
+            titulo = f"⚪ Protocolo {chamado['protocolo']} – {chamado['tipo_defeito']}"
+            texto = (
+                f"UBS: {chamado['ubs']}\n"
+                f"Setor: {chamado['setor']}\n"
+                f"Abertura: {chamado['hora_abertura']}\n"
+                f"Fechamento: {chamado['hora_fechamento']}\n"
+                f"Tempo útil: {chamado['tempo_util']}\n"
+                f"Solução: {chamado.get('solucao', '')}\n"
+            )
+            with cols[idx % n_por_linha]:
+                card(
+                    title=titulo,
+                    text=texto,
+                    image="",
+                    key=f"card_fechado_{chamado['protocolo']}",
+                )
+        st.markdown("---")
+
+    # 8) Submenu com abas “Finalizar” e “Reabrir”
     st.markdown("### Ação nos Chamados")
     tab1, tab2 = st.tabs(["✅ Finalizar Chamado", "🔄 Reabrir Chamado"])
 
     with tab1:
-        # Usa DataFrame para filtrar apenas os abertos
         df_abertos = df[df["aberto"]].copy()
         if df_abertos.empty:
             st.info("Nenhum chamado aberto para finalizar.")
@@ -426,7 +504,7 @@ def chamados_tecnicos_page():
             estoque_data = get_estoque() or []
             pieces_list = [item["nome"] for item in estoque_data]
             pecas_selecionadas = st.multiselect(
-                "Selecione as peças utilizadas (se houver)", pieces_list
+                "Selecione peças utilizadas (se houver)", pieces_list
             )
             if st.button("Finalizar Chamado"):
                 if not sol.strip():
