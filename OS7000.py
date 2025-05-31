@@ -81,7 +81,7 @@ if os.path.exists(logo_path):
 else:
     st.warning("Logotipo não encontrado.")
 
-st.title("Gestão de Parque de Informática - UBS ITAPIPOCA")
+st.title("Gestão de Parque de Informática - APS ITAPIPOCA")
 
 ####################################
 # Função Auxiliar para Exibir Chamado
