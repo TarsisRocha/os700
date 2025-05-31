@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 import pytz
-
+import base64
 import streamlit as st
 from streamlit_option_menu import option_menu
 from st_aggrid import AgGrid, GridOptionsBuilder
@@ -74,19 +74,21 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Carrega (se existir) o logotipo
 logo_path = os.getenv("LOGO_PATH", "infocustec.png")
 if os.path.exists(logo_path):
+    with open(logo_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
     st.markdown(
         f"""
-        <div style="display: flex; justify-content: center; align-items: center; padding: 10px;">
-            <img src="data:image/png;base64,{open(logo_path, 'rb').read().encode('base64').decode()}" style="height:80px;" />
+        <div style="display: flex; justify-content: center; padding: 10px;">
+            <img src="data:image/png;base64,{b64}" style="height:80px;" />
         </div>
         """,
         unsafe_allow_html=True
     )
 else:
     st.warning("Logotipo não encontrado.")
+
 
 
 st.title("Gestão de Parque de Informática - APS ITAPIPOCA")
