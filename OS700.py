@@ -9,10 +9,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 import pytz
-from st_aggrid import AgGrid, GridOptionsBuilder
 from streamlit_option_menu import option_menu
 import plotly.express as px
-from streamlit_card import card  # pip install streamlit-card
 
 # ===== 3) Módulos internos =====
 from autenticacao import authenticate, add_user, is_admin, list_users
@@ -32,7 +30,7 @@ from inventario import (
 )
 from ubs import get_ubs_list
 from setores import get_setores_list
-from estoque import manage_estoque, get_estoque  # get_estoque para puxar lista de peças
+from estoque import manage_estoque, get_estoque
 
 # ==================== Configurações iniciais ====================
 FORTALEZA_TZ = pytz.timezone("America/Fortaleza")
@@ -58,7 +56,8 @@ with col2:
     else:
         st.warning("Logotipo não encontrado.")
     st.markdown(
-        "<h1 style='text-align: center; color: #1F2937;'>Gestão de Parque de Informática - APS ITAPIPOCA</h1>",
+        "<h1 style='text-align: center; color: #1F2937;'>"
+        "Gestão de Parque de Informática - APS ITAPIPOCA</h1>",
         unsafe_allow_html=True,
     )
 st.markdown("---")
@@ -131,7 +130,7 @@ def login_page():
             st.success(f"Bem-vindo, {usuario}!")
             st.session_state["logged_in"] = True
             st.session_state["username"] = usuario
-            st.stop()
+            st.experimental_rerun()
         else:
             st.error("Usuário ou senha incorretos.")
 
@@ -167,7 +166,7 @@ def dashboard_page():
         if c.get("hora_fechamento") is None:
             try:
                 abertura = datetime.strptime(c["hora_abertura"], "%d/%m/%Y %H:%M:%S")
-                util = calculate_working_hours(abertura, datetime.now(FORTALEZA_TZ))
+                util = calculate_working_hours(abertura, agora)
                 if util > timedelta(hours=24):
                     atrasados.append(c)
             except:
@@ -330,7 +329,7 @@ def exibir_chamado(chamado: dict):
         st.markdown(chamado["solucao"])
 
 
-# ==================== 4) Página de Chamados Técnicos (com cards coloridos) ====================
+# ==================== 4) Página de Chamados Técnicos (expanders) ====================
 def chamados_tecnicos_page():
     st.subheader("Chamados Técnicos")
     st.markdown("Painel para visualizar, finalizar ou reabrir chamados técnicos.")
@@ -342,143 +341,95 @@ def chamados_tecnicos_page():
         st.info("Nenhum chamado registrado.")
         return
 
-    # 1) Monta DataFrame para calcular abertos/fechados e determinar overdue
+    # Monta DataFrame para status
     df = pd.DataFrame(chamados)
     df["hora_abertura_dt"] = pd.to_datetime(
         df["hora_abertura"], format="%d/%m/%Y %H:%M:%S", errors="coerce"
     )
     df["aberto"] = df["hora_fechamento"].isnull()
 
-    # 2) Calcula “tempo_util” e cria campo de timedelta para overdue
-    now = datetime.now(FORTALEZA_TZ)
-    for chamado in chamados:
-        if chamado.get("hora_fechamento") is None:
+    # Calcula tempo útil e marca overdue
+    agora = datetime.now(FORTALEZA_TZ)
+    overdue, abertos, fechados = [], [], []
+    for c in chamados:
+        if c.get("hora_fechamento") is None:
             try:
-                abertura = datetime.strptime(chamado["hora_abertura"], "%d/%m/%Y %H:%M:%S")
-                util = calculate_working_hours(abertura, now)
-                chamado["util_timedelta"] = util
-                seg = int(util.total_seconds())
-                h = seg // 3600
-                m = (seg % 3600) // 60
-                chamado["tempo_util"] = f"{h}h {m}m" if h else f"{m}m"
+                abertura = datetime.strptime(c["hora_abertura"], "%d/%m/%Y %H:%M:%S")
+                util = calculate_working_hours(abertura, agora)
+                c["tempo_util"] = (
+                    f"{util.seconds // 3600}h {(util.seconds % 3600) // 60}m"
+                    if util.total_seconds() > 0
+                    else "0m"
+                )
+                c["overdue"] = util > timedelta(hours=24)
             except:
-                chamado["util_timedelta"] = timedelta(0)
-                chamado["tempo_util"] = "-"
-            chamado["status"] = "Aberto"
+                c["tempo_util"] = "-"
+                c["overdue"] = False
+            c["status"] = "Aberto"
         else:
-            chamado["util_timedelta"] = timedelta(0)
-            chamado["tempo_util"] = "-"
-            chamado["status"] = "Fechado"
+            c["tempo_util"] = "-"
+            c["status"] = "Fechado"
+            c["overdue"] = False
 
-    # 3) Categoriza em 3 listas: overdue, abertos, fechados
-    overdue = []
-    abertos = []
-    fechados = []
-    for chamado in chamados:
-        if chamado["status"] == "Aberto":
-            if chamado["util_timedelta"] > timedelta(hours=24):
-                overdue.append(chamado)
-            else:
-                abertos.append(chamado)
+        if c["status"] == "Fechado":
+            fechados.append(c)
+        elif c["overdue"]:
+            overdue.append(c)
         else:
-            fechados.append(chamado)
+            abertos.append(c)
 
-    # 4) Exibe métricas
+    # Mostra métricas
     total = len(chamados)
     qt_abertos = len(abertos) + len(overdue)
     qt_fechados = len(fechados)
-    c1, c2, c3 = st.columns([1, 1, 1])
+    c1, c2, c3 = st.columns(3)
     c1.metric("Total de Chamados", total)
     c2.metric("Aberto (incl. overdue)", qt_abertos)
     c3.metric("Fechados", qt_fechados)
     st.markdown("---")
 
-    # 5) Seção “Overdue” (em vermelho)
+    # Seção Overdue (vermelho)
     if overdue:
         st.markdown(
             "<div style='background-color:#f8d7da; padding:8px; border-radius:4px;'>"
             "<strong>❗ Chamados Overdue (abertos há mais de 24h úteis)</strong></div>",
             unsafe_allow_html=True,
         )
-        n_por_linha = 3
-        for idx, chamado in enumerate(overdue):
-            if idx % n_por_linha == 0:
-                cols = st.columns(n_por_linha)
-            titulo = f"🔴 Protocolo {chamado['protocolo']} – {chamado['tipo_defeito']}"
-            texto = (
-                f"UBS: {chamado['ubs']}\n"
-                f"Setor: {chamado['setor']}\n"
-                f"Abertura: {chamado['hora_abertura']}\n"
-                f"Status: {chamado['status']}\n"
-                f"Tempo útil: {chamado['tempo_util']}\n"
-            )
-            with cols[idx % n_por_linha]:
-                card(
-                    title=titulo,
-                    text=texto,
-                    image="",
-                    key=f"card_overdue_{chamado['protocolo']}",
-                )
+        for c in overdue:
+            with st.expander(f"🔴 {c['protocolo']} – {c['tipo_defeito']} (Overdue)"):
+                st.write(f"UBS: {c['ubs']}  |  Setor: {c['setor']}")
+                st.write(f"Abertura: {c['hora_abertura']}  |  Tempo: {c['tempo_util']}")
         st.markdown("---")
 
-    # 6) Seção “Abertos” (em verde)
+    # Seção Abertos (verde)
     if abertos:
         st.markdown(
             "<div style='background-color:#d1e7dd; padding:8px; border-radius:4px;'>"
             "<strong>🟢 Chamados Abertos (até 24h úteis)</strong></div>",
             unsafe_allow_html=True,
         )
-        n_por_linha = 3
-        for idx, chamado in enumerate(abertos):
-            if idx % n_por_linha == 0:
-                cols = st.columns(n_por_linha)
-            titulo = f"🟢 Protocolo {chamado['protocolo']} – {chamado['tipo_defeito']}"
-            texto = (
-                f"UBS: {chamado['ubs']}\n"
-                f"Setor: {chamado['setor']}\n"
-                f"Abertura: {chamado['hora_abertura']}\n"
-                f"Status: {chamado['status']}\n"
-                f"Tempo útil: {chamado['tempo_util']}\n"
-            )
-            with cols[idx % n_por_linha]:
-                card(
-                    title=titulo,
-                    text=texto,
-                    image="",
-                    key=f"card_aberto_{chamado['protocolo']}",
-                )
+        for c in abertos:
+            with st.expander(f"🟢 {c['protocolo']} – {c['tipo_defeito']}"):
+                st.write(f"UBS: {c['ubs']}  |  Setor: {c['setor']}")
+                st.write(f"Abertura: {c['hora_abertura']}  |  Tempo: {c['tempo_util']}")
         st.markdown("---")
 
-    # 7) Seção “Fechados” (em cinza)
+    # Seção Fechados (cinza)
     if fechados:
         st.markdown(
             "<div style='background-color:#e2e3e5; padding:8px; border-radius:4px;'>"
             "<strong>⚪ Chamados Fechados</strong></div>",
             unsafe_allow_html=True,
         )
-        n_por_linha = 3
-        for idx, chamado in enumerate(fechados):
-            if idx % n_por_linha == 0:
-                cols = st.columns(n_por_linha)
-            titulo = f"⚪ Protocolo {chamado['protocolo']} – {chamado['tipo_defeito']}"
-            texto = (
-                f"UBS: {chamado['ubs']}\n"
-                f"Setor: {chamado['setor']}\n"
-                f"Abertura: {chamado['hora_abertura']}\n"
-                f"Fechamento: {chamado['hora_fechamento']}\n"
-                f"Tempo útil: {chamado['tempo_util']}\n"
-                f"Solução: {chamado.get('solucao', '')}\n"
-            )
-            with cols[idx % n_por_linha]:
-                card(
-                    title=titulo,
-                    text=texto,
-                    image="",
-                    key=f"card_fechado_{chamado['protocolo']}",
-                )
+        for c in fechados:
+            with st.expander(f"⚪ {c['protocolo']} – {c['tipo_defeito']}"):
+                st.write(f"UBS: {c['ubs']}  |  Setor: {c['setor']}")
+                st.write(f"Abertura: {c['hora_abertura']}  |  Fechamento: {c['hora_fechamento']}")
+                if c.get("solucao"):
+                    st.write(f"Solução: {c['solucao']}")
         st.markdown("---")
 
-    # 8) Submenu com abas “Finalizar” e “Reabrir”
+    # Submenu Finalizar/Reabrir
     st.markdown("### Ação nos Chamados")
     tab1, tab2 = st.tabs(["✅ Finalizar Chamado", "🔄 Reabrir Chamado"])
 
@@ -487,9 +438,7 @@ def chamados_tecnicos_page():
         if df_abertos.empty:
             st.info("Nenhum chamado aberto para finalizar.")
         else:
-            sel = st.selectbox(
-                "Selecione Protocolo para finalizar", df_abertos["protocolo"].tolist()
-            )
+            sel = st.selectbox("Protocolo para finalizar", df_abertos["protocolo"].tolist())
             cham = df_abertos[df_abertos["protocolo"] == sel].iloc[0]
             cA, cB = st.columns(2)
             with cA:
@@ -512,16 +461,14 @@ def chamados_tecnicos_page():
                 else:
                     finalizar_chamado(cham["id"], sol, pecas_usadas=pecas_selecionadas)
                     st.success(f"Chamado {cham['protocolo']} finalizado!")
-                    st.stop()
+                    st.experimental_rerun()
 
     with tab2:
         df_fechados = df[~df["aberto"]].copy()
         if df_fechados.empty:
             st.info("Nenhum chamado fechado para reabrir.")
         else:
-            sel = st.selectbox(
-                "Selecione Protocolo para reabrir", df_fechados["protocolo"].tolist()
-            )
+            sel = st.selectbox("Protocolo para reabrir", df_fechados["protocolo"].tolist())
             cham = df_fechados[df_fechados["protocolo"] == sel].iloc[0]
             cA, cB = st.columns(2)
             with cA:
@@ -536,7 +483,7 @@ def chamados_tecnicos_page():
             if st.button("Reabrir Chamado"):
                 reabrir_chamado(cham["id"], remover_historico=remover)
                 st.success(f"Chamado {cham['protocolo']} reaberto!")
-                st.stop()
+                st.experimental_rerun()
 
 
 # ==================== 5) Página de Inventário ====================
@@ -549,10 +496,8 @@ def inventario_page():
     )
     with tab1:
         show_inventory_list()
-
     with tab2:
         cadastro_maquina()
-
     with tab3:
         dashboard_inventario()
 
@@ -566,8 +511,7 @@ def estoque_page():
     with tab1:
         estoque_data = get_estoque() or []
         if estoque_data:
-            df_estoque = pd.DataFrame(estoque_data)
-            st.dataframe(df_estoque)
+            st.dataframe(pd.DataFrame(estoque_data))
         else:
             st.info("Estoque vazio.")
     with tab2:
@@ -655,11 +599,10 @@ def relatorios_page():
         df_period = df_period[df_period["ubs"].isin(filtro_ubs)]
 
     st.markdown("### Chamados Técnicos no Período")
-    gb = GridOptionsBuilder.from_dataframe(df_period)
-    gb.configure_default_column(filter=True, sortable=True)
-    gb.configure_pagination(paginationAutoPageSize=True)
-    gb.configure_grid_options(domLayout="normal")
-    AgGrid(df_period, gridOptions=gb.build(), height=350, fit_columns_on_grid_load=True)
+    if not df_period.empty:
+        st.dataframe(df_period)
+    else:
+        st.info("Sem chamados neste período.")
 
     abertos = df_period["hora_fechamento"].isnull().sum()
     fechados = df_period["hora_fechamento"].notnull().sum()
@@ -762,7 +705,7 @@ elif selected == "Sair":
     st.session_state["logged_in"] = False
     st.session_state["username"] = ""
     st.success("Você saiu com sucesso. Até breve!")
-    st.stop()
+    st.experimental_rerun()
 
 else:
     st.info("Selecione uma opção no menu acima.")
