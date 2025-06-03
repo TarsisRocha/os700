@@ -544,13 +544,11 @@ def administracao_page():
     with tab2:
         st.markdown("### Gerenciar UBSs")
         from ubs import manage_ubs
-
         manage_ubs()
 
     with tab3:
         st.markdown("### Gerenciar Setores")
         from setores import manage_setores
-
         manage_setores()
 
     with tab4:
