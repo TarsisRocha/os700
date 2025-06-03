@@ -130,7 +130,7 @@ def login_page():
             st.success(f"Bem-vindo, {usuario}!")
             st.session_state["logged_in"] = True
             st.session_state["username"] = usuario
-            st.experimental_rerun()
+            st.stop()  # interrompe para que, no próximo ciclo, o menu já atualize
         else:
             st.error("Usuário ou senha incorretos.")
 
@@ -461,7 +461,7 @@ def chamados_tecnicos_page():
                 else:
                     finalizar_chamado(cham["id"], sol, pecas_usadas=pecas_selecionadas)
                     st.success(f"Chamado {cham['protocolo']} finalizado!")
-                    st.experimental_rerun()
+                    st.stop()
 
     with tab2:
         df_fechados = df[~df["aberto"]].copy()
@@ -483,7 +483,7 @@ def chamados_tecnicos_page():
             if st.button("Reabrir Chamado"):
                 reabrir_chamado(cham["id"], remover_historico=remover)
                 st.success(f"Chamado {cham['protocolo']} reaberto!")
-                st.experimental_rerun()
+                st.stop()
 
 
 # ==================== 5) Página de Inventário ====================
@@ -703,7 +703,7 @@ elif selected == "Sair":
     st.session_state["logged_in"] = False
     st.session_state["username"] = ""
     st.success("Você saiu com sucesso. Até breve!")
-    st.experimental_rerun()
+    st.stop()
 
 else:
     st.info("Selecione uma opção no menu acima.")
