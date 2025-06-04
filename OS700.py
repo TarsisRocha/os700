@@ -11,6 +11,7 @@ import streamlit as st
 import pytz
 from streamlit_option_menu import option_menu
 import plotly.express as px
+from streamlit_card import card  # pip install streamlit-card
 
 # ===== 3) Módulos internos =====
 from autenticacao import authenticate, add_user, is_admin, list_users
@@ -130,7 +131,7 @@ def login_page():
             st.success(f"Bem-vindo, {usuario}!")
             st.session_state["logged_in"] = True
             st.session_state["username"] = usuario
-            st.stop()  # interrompe para que, no próximo ciclo, o menu já atualize
+            st.experimental_rerun()
         else:
             st.error("Usuário ou senha incorretos.")
 
@@ -329,7 +330,7 @@ def exibir_chamado(chamado: dict):
         st.markdown(chamado["solucao"])
 
 
-# ==================== 4) Página de Chamados Técnicos (expanders) ====================
+# ==================== 4) Página de Chamados Técnicos (mini-cards clicáveis) ====================
 def chamados_tecnicos_page():
     st.subheader("Chamados Técnicos")
     st.markdown("Painel para visualizar, finalizar ou reabrir chamados técnicos.")
@@ -388,102 +389,88 @@ def chamados_tecnicos_page():
     c3.metric("Fechados", qt_fechados)
     st.markdown("---")
 
-    # Seção Overdue (vermelho)
-    if overdue:
-        st.markdown(
-            "<div style='background-color:#f8d7da; padding:8px; border-radius:4px;'>"
-            "<strong>❗ Chamados Overdue (abertos há mais de 24h úteis)</strong></div>",
-            unsafe_allow_html=True,
+    # Função auxiliar para desenhar mini-card e capturar clique
+    def draw_clickable_card(ch, cor):
+        titulo = f"{ch['protocolo']} - {ch['tipo_defeito'][:20]}"
+        texto = (
+            f"UBS: {ch['ubs']}  |  Setor: {ch['setor']}\n"
+            f"Abertura: {ch['hora_abertura']}  |  Tempo: {ch['tempo_util']}"
         )
-        for c in overdue:
-            with st.expander(f"🔴 {c['protocolo']} – {c['tipo_defeito']} (Overdue)"):
-                st.write(f"UBS: {c['ubs']}  |  Setor: {c['setor']}")
-                st.write(f"Abertura: {c['hora_abertura']}  |  Tempo: {c['tempo_util']}")
-        st.markdown("---")
-
-    # Seção Abertos (verde)
-    if abertos:
-        st.markdown(
-            "<div style='background-color:#d1e7dd; padding:8px; border-radius:4px;'>"
-            "<strong>🟢 Chamados Abertos (até 24h úteis)</strong></div>",
-            unsafe_allow_html=True,
+        clicked = card(
+            title=titulo,
+            text=texto,
+            image="",
+            key=f"mini_{ch['protocolo']}",
+            width="100%",
+            style={"border": f"2px solid {cor}", "padding": "4px", "font-size": "12px"},
         )
-        for c in abertos:
-            with st.expander(f"🟢 {c['protocolo']} – {c['tipo_defeito']}"):
-                st.write(f"UBS: {c['ubs']}  |  Setor: {c['setor']}")
-                st.write(f"Abertura: {c['hora_abertura']}  |  Tempo: {c['tempo_util']}")
-        st.markdown("---")
+        return clicked
 
-    # Seção Fechados (cinza)
-    if fechados:
-        st.markdown(
-            "<div style='background-color:#e2e3e5; padding:8px; border-radius:4px;'>"
-            "<strong>⚪ Chamados Fechados</strong></div>",
-            unsafe_allow_html=True,
-        )
-        for c in fechados:
-            with st.expander(f"⚪ {c['protocolo']} – {c['tipo_defeito']}"):
-                st.write(f"UBS: {c['ubs']}  |  Setor: {c['setor']}")
-                st.write(f"Abertura: {c['hora_abertura']}  |  Fechamento: {c['hora_fechamento']}")
-                if c.get("solucao"):
-                    st.write(f"Solução: {c['solucao']}")
-        st.markdown("---")
+    # Seções categorizadas em colunas de 4
+    sections = [
+        ("❗ Overdue (vermelho)", overdue, "#dc3545"),
+        ("🟢 Abertos (verde)", abertos, "#28a745"),
+        ("⚪ Fechados (cinza)", fechados, "#6c757d"),
+    ]
 
-    # Submenu Finalizar/Reabrir
-    st.markdown("### Ação nos Chamados")
-    tab1, tab2 = st.tabs(["✅ Finalizar Chamado", "🔄 Reabrir Chamado"])
+    # Área temporária para exibir formulário de finalização quando um card for clicado
+    clicked_chamado = None
 
-    with tab1:
-        df_abertos = df[df["aberto"]].copy()
-        if df_abertos.empty:
-            st.info("Nenhum chamado aberto para finalizar.")
-        else:
-            sel = st.selectbox("Protocolo para finalizar", df_abertos["protocolo"].tolist())
-            cham = df_abertos[df_abertos["protocolo"] == sel].iloc[0]
-            cA, cB = st.columns(2)
-            with cA:
-                st.write(f"**ID:** {cham['id']}")
-                st.write(f"**UBS:** {cham['ubs']}")
-                st.write(f"**Setor:** {cham['setor']}")
-            with cB:
-                st.write(f"**Tipo:** {cham['tipo_defeito']}")
-                st.write(f"**Abertura:** {cham['hora_abertura']}")
+    for title, group, color in sections:
+        if group:
+            st.markdown(
+                f"<div style='background-color:{color}20; padding:6px; border-radius:4px;'>"
+                f"<strong>{title}</strong></div>",
+                unsafe_allow_html=True,
+            )
+            n_por_linha = 4
+            for idx, ch in enumerate(group):
+                if idx % n_por_linha == 0:
+                    cols = st.columns(n_por_linha, gap="small")
+                with cols[idx % n_por_linha]:
+                    if draw_clickable_card(ch, color):
+                        clicked_chamado = ch
             st.markdown("---")
+
+    # Se um card foi clicado, mostrar detalhes + opção de finalizar
+    if clicked_chamado:
+        cham = clicked_chamado
+        st.markdown(f"### Chamado {cham['protocolo']} selecionado")
+        colA, colB = st.columns(2)
+        with colA:
+            st.write(f"**ID:** {cham['id']}")
+            st.write(f"**Usuário:** {cham['username']}")
+            st.write(f"**UBS:** {cham['ubs']}")
+            st.write(f"**Setor:** {cham['setor']}")
+            st.write(f"**Tipo de Defeito:** {cham['tipo_defeito']}")
+        with colB:
+            st.write(f"**Patrimônio:** {cham.get('patrimonio', '—')}")
+            st.write(f"**Abertura:** {cham['hora_abertura']}")
+            st.write(f"**Status:** {cham['status']}")
+            if cham["status"] == "Fechado":
+                st.write(f"**Fechamento:** {cham['hora_fechamento']}")
+        st.markdown("---")
+
+        if cham["status"] == "Aberto":
             sol = st.text_area("Solução", placeholder="Descreva a solução", height=100)
             estoque_data = get_estoque() or []
             pieces_list = [item["nome"] for item in estoque_data]
             pecas_selecionadas = st.multiselect(
                 "Selecione peças utilizadas (se houver)", pieces_list
             )
-            if st.button("Finalizar Chamado"):
+            if st.button(f"Finalizar Chamado {cham['protocolo']}"):
                 if not sol.strip():
                     st.error("Informe a solução.")
                 else:
                     finalizar_chamado(cham["id"], sol, pecas_usadas=pecas_selecionadas)
                     st.success(f"Chamado {cham['protocolo']} finalizado!")
-                    st.stop()
-
-    with tab2:
-        df_fechados = df[~df["aberto"]].copy()
-        if df_fechados.empty:
-            st.info("Nenhum chamado fechado para reabrir.")
+                    st.experimental_rerun()
         else:
-            sel = st.selectbox("Protocolo para reabrir", df_fechados["protocolo"].tolist())
-            cham = df_fechados[df_fechados["protocolo"] == sel].iloc[0]
-            cA, cB = st.columns(2)
-            with cA:
-                st.write(f"**ID:** {cham['id']}")
-                st.write(f"**UBS:** {cham['ubs']}")
-                st.write(f"**Setor:** {cham['setor']}")
-            with cB:
-                st.write(f"**Tipo:** {cham['tipo_defeito']}")
-                st.write(f"**Abertura:** {cham['hora_abertura']}")
-                st.write(f"**Fechamento:** {cham['hora_fechamento']}")
-            remover = st.checkbox("Remover histórico associado?", value=False)
-            if st.button("Reabrir Chamado"):
-                reabrir_chamado(cham["id"], remover_historico=remover)
+            st.info("Este chamado já está fechado.")
+            if st.button(f"Reabrir Chamado {cham['protocolo']}"):
+                reabrir_chamado(cham["id"], remover_historico=False)
                 st.success(f"Chamado {cham['protocolo']} reaberto!")
-                st.stop()
+                st.experimental_rerun()
 
 
 # ==================== 5) Página de Inventário ====================
@@ -703,7 +690,7 @@ elif selected == "Sair":
     st.session_state["logged_in"] = False
     st.session_state["username"] = ""
     st.success("Você saiu com sucesso. Até breve!")
-    st.stop()
+    st.experimental_rerun()
 
 else:
     st.info("Selecione uma opção no menu acima.")
