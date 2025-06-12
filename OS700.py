@@ -396,25 +396,24 @@ def draw_clickable_card(ch, cor):
     Desenha um card clicável para cada chamado.
     Ao clicar, finaliza o chamado.
     """
+    st.write("Renderizando card de protocolo:", ch['protocolo'])
     titulo = f"Chamado {ch['protocolo']}"
     texto = (
-        f"UBS: {ch.get('ubs','—')}  |  Setor: {ch.get('setor','—')}\n"
-        f"Abertura: {ch.get('hora_abertura','—')}  |  Tempo: {ch.get('tempo_util','—')}"
+        f"UBS: {ch.get('ubs','—')}\n"
+        f"Setor: {ch.get('setor','—')}\n"
+        f"Abertura: {ch.get('hora_abertura','—')}\n"
+        f"Tempo: {ch.get('tempo_util','—')}"
     )
     key = f"card-{ch['protocolo']}"
     clicked = card(
-        title=titulo,
-        text=texto,
-        image=None,
-        use_column_width=False,
+        titulo,
+        texto,
+        None,
         key=key,
-        styles={
-            "card": {"border": f"2px solid {cor}", "width": "200px", "height": "100px"},
-            "title": {"font-size": "14px"},
-            "text": {"font-size": "12px"},
-        },
+        use_column_width=True
     )
     if clicked:
+        st.write("Você clicou no protocolo:", ch['protocolo'])
         finalizar_chamado(ch['id'])
     return clicked
 
