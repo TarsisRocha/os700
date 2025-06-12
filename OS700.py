@@ -390,21 +390,32 @@ def chamados_tecnicos_page():
     st.markdown("---")
 
     # Função auxiliar para desenhar mini-card e capturar clique
-    def draw_clickable_card(ch, cor):
-        titulo = f"{ch['protocolo']} - {ch['tipo_defeito'][:20]}"
-        texto = (
-            f"UBS: {ch['ubs']}  |  Setor: {ch['setor']}\n"
-            f"Abertura: {ch['hora_abertura']}  |  Tempo: {ch['tempo_util']}"
-        )
-        clicked = card(
-            title=titulo,
-            text=texto,
-            image="",
-            key=f"mini_{ch['protocolo']}",
-            width="100%",
-            style={"border": f"2px solid {cor}", "padding": "4px", "font-size": "12px"},
-        )
-        return clicked
+def draw_clickable_card(ch, cor):
+    """
+    Desenha um card clicável para cada chamado.
+    Ao clicar, finaliza o chamado.
+    """
+    titulo = f"Chamado {ch['protocolo']}"
+    texto = (
+        f"UBS: {ch.get('ubs','—')}  |  Setor: {ch.get('setor','—')}\n"
+        f"Abertura: {ch.get('hora_abertura','—')}  |  Tempo: {ch.get('tempo_util','—')}"
+    )
+    key = f"card-{ch['protocolo']}"
+    clicked = card(
+        title=titulo,
+        text=texto,
+        image=None,
+        use_column_width=False,
+        key=key,
+        styles={
+            "card": {"border": f"2px solid {cor}", "width": "200px", "height": "100px"},
+            "title": {"font-size": "14px"},
+            "text": {"font-size": "12px"},
+        },
+    )
+    if clicked:
+        finalizar_chamado(ch['id'])
+    return clicked
 
     # Seções categorizadas em colunas de 4
     sections = [
