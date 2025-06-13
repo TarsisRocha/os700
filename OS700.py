@@ -418,7 +418,7 @@ def chamados_tecnicos_page():
             text=texto,
             image=None,
             key=key,
-            use_container_width=True
+            use_column_width=True
         )
 
         if clicked:
