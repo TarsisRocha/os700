@@ -414,12 +414,13 @@ def chamados_tecnicos_page():
         )
         key = f"card-{ch['protocolo']}"
         clicked = card(
-            titulo,
-            texto,
-            None,
+            title=titulo,
+            text=texto,
+            image=None,
             key=key,
-            use_column_width=True
+            use_container_width=True
         )
+
         if clicked:
             finalizar_chamado(ch['id'])
         return clicked
