@@ -15,7 +15,7 @@ from io import BytesIO
 FORTALEZA_TZ = pytz.timezone("America/Fortaleza")
 
 # Importação dos módulos internos (mantidos sem alterações)
-from autenticacao import authenticate, add_user, is_admin, list_users
+from autenticacao import authenticate, add_user, is_admin, list_users, force_change_password
 from chamados import (
     add_chamado,
     get_chamado_by_protocolo,
