@@ -486,11 +486,11 @@ def administracao_page():
         else:
             st.write("Nenhum usuário cadastrado.")
     elif admin_option == "Redefinir Senha de Usuário":
-    alvo = st.selectbox("Selecione o usuário", [u for u, _ in list_users()])
-    nova = st.text_input("Nova senha", type="password")
-    if st.button("Alterar senha") and nova:
-        ok = force_change_password(st.session_state["username"], alvo, nova)
-        st.success("Senha redefinida!") if ok else st.error("Falha ao redefinir senha.")
+        alvo = st.selectbox("Selecione o usuário", [u for u, _ in list_users()])
+        nova = st.text_input("Nova senha", type="password")
+                if st.button("Alterar senha") and nova:
+                ok = force_change_password(st.session_state["username"], alvo, nova)
+                st.success("Senha redefinida!") if ok else st.error("Falha ao redefinir senha.")
 
 ####################################
 # 9) Página de Relatórios
