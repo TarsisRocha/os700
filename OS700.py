@@ -50,7 +50,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# ==================== Cabeçalho (logo + título) centralizado ====================
+# ==================== Cabeçalho (logo + título) ====================
 logo_path = os.getenv("LOGO_PATH", "infocustec.png")
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
@@ -347,13 +347,7 @@ def chamados_tecnicos_page():
         return
 
     # Monta DataFrame para status
-    df = pd.DataFrame(chamados)
-    df["hora_abertura_dt"] = pd.to_datetime(
-        df["hora_abertura"], format="%d/%m/%Y %H:%M:%S", errors="coerce"
-    )
-
     agora = datetime.now(FORTALEZA_TZ)
-    overdue, abertos, fechados = [], [], []
     for c in chamados:
         if c.get("hora_fechamento") is None:
             try:
@@ -374,12 +368,9 @@ def chamados_tecnicos_page():
             c["status"] = "Fechado"
             c["overdue"] = False
 
-        if c["status"] == "Fechado":
-            fechados.append(c)
-        elif c["overdue"]:
-            overdue.append(c)
-        else:
-            abertos.append(c)
+    overdue = [c for c in chamados if c["status"] == "Aberto" and c["overdue"]]
+    abertos = [c for c in chamados if c["status"] == "Aberto" and not c["overdue"]]
+    fechados = [c for c in chamados if c["status"] == "Fechado"]
 
     total = len(chamados)
     qt_abertos = len(abertos) + len(overdue)
@@ -392,40 +383,36 @@ def chamados_tecnicos_page():
 
     # Função auxiliar para desenhar mini-card e capturar clique
     def draw_clickable_card(ch, cor):
-        titulo = f"{ch['protocolo']} - {ch['tipo_defeito'][:20]}"
-        texto = (
-            f"UBS: {ch['ubs']}  |  Setor: {ch['setor']}\n"
-            f"Abertura: {ch['hora_abertura']}  |  Tempo: {ch['tempo_util']}"
-        )
-        clicked = card(
-            title=titulo,
-            text=texto,
-            image="",
-            key=f"mini_{ch['protocolo']}",
-            width="100%",
-            style={"border": f"2px solid {cor}", "padding": "4px", "font-size": "12px"},
-        )
-        return clicked
+        try:
+            titulo = f"{ch.get('protocolo','')} - {ch.get('tipo_defeito','')[:20]}"
+            texto = (
+                f"UBS: {ch.get('ubs','')} | Setor: {ch.get('setor','')}\n"
+                f"Abertura: {ch.get('hora_abertura','')} | Tempo: {ch.get('tempo_util','')}"
+            )
+            clicked = card(
+                title=titulo,
+                text=texto,
+                image=None,                       # sem imagem
+                key=f"card_{ch.get('id','')}"     # chave única
+            )
+            return clicked
+        except Exception as e:
+            st.error(f"Erro ao exibir card: {e}")
+            return False
 
     sections = [
-        ("❗ Overdue (vermelho)", overdue, "#dc3545"),
-        ("🟢 Abertos (verde)", abertos, "#28a745"),
-        ("⚪ Fechados (cinza)", fechados, "#6c757d"),
+        ("❗ Overdue", overdue, "#dc3545"),
+        ("🟢 Abertos", abertos, "#28a745"),
+        ("⚪ Fechados", fechados, "#6c757d"),
     ]
 
     clicked_chamado = None
     for title, group, color in sections:
         if group:
-            st.markdown(
-                f"<div style='background-color:{color}20; padding:6px; border-radius:4px;'>"
-                f"<strong>{title}</strong></div>",
-                unsafe_allow_html=True,
-            )
-            n_por_linha = 4
+            st.markdown(f"**{title}**")
+            cols = st.columns(4, gap="small")
             for idx, ch in enumerate(group):
-                if idx % n_por_linha == 0:
-                    cols = st.columns(n_por_linha, gap="small")
-                with cols[idx % n_por_linha]:
+                with cols[idx % 4]:
                     if draw_clickable_card(ch, color):
                         clicked_chamado = ch
             st.markdown("---")
@@ -452,19 +439,16 @@ def chamados_tecnicos_page():
         if cham["status"] == "Aberto":
             sol = st.text_area("Solução", placeholder="Descreva a solução", height=100)
             estoque_data = get_estoque() or []
-            pieces_list = [item["nome"] for item in estoque_data]
-            pecas_selecionadas = st.multiselect(
-                "Selecione peças utilizadas (se houver)", pieces_list
-            )
+            pecas = [item["nome"] for item in estoque_data]
+            pecas_sel = st.multiselect("Peças usadas (opcional)", pecas)
             if st.button(f"Finalizar Chamado {cham['protocolo']}"):
                 if not sol.strip():
                     st.error("Informe a solução.")
                 else:
-                    finalizar_chamado(cham["id"], sol, pecas_usadas=pecas_selecionadas)
+                    finalizar_chamado(cham["id"], sol, pecas_usadas=pecas_sel)
                     st.success(f"Chamado {cham['protocolo']} finalizado!")
                     st.experimental_rerun()
         else:
-            st.info("Este chamado já está fechado.")
             if st.button(f"Reabrir Chamado {cham['protocolo']}"):
                 reabrir_chamado(cham["id"], remover_historico=False)
                 st.success(f"Chamado {cham['protocolo']} reaberto!")
@@ -506,9 +490,8 @@ def administracao_page():
         ["👤 Cadastro de Usuário", "🏥 Gerenciar UBSs", "🏢 Gerenciar Setores", "📜 Lista de Usuários"]
     )
     with tab1:
-        st.markdown("### Cadastro de Usuário")
-        novo_user = st.text_input("Novo Usuário", placeholder="Digite o username")
-        nova_senha = st.text_input("Senha", type="password", placeholder="Digite a senha")
+        novo_user = st.text_input("Novo Usuário")
+        nova_senha = st.text_input("Senha", type="password")
         admin_flag = st.checkbox("Administrador")
         if st.button("Cadastrar Usuário"):
             if novo_user and nova_senha:
@@ -519,15 +502,12 @@ def administracao_page():
             else:
                 st.error("Preencha username e senha.")
     with tab2:
-        st.markdown("### Gerenciar UBSs")
         from ubs import manage_ubs
         manage_ubs()
     with tab3:
-        st.markdown("### Gerenciar Setores")
         from setores import manage_setores
         manage_setores()
     with tab4:
-        st.markdown("### Lista de Usuários")
         usuarios = list_users()
         if usuarios:
             st.table(usuarios)
@@ -545,33 +525,38 @@ def relatorios_page():
         end_date = st.date_input("Data Fim")
     with c3:
         filtro_ubs = st.multiselect("Filtrar por UBS", get_ubs_list())
+
     if start_date > end_date:
         st.error("Data Início não pode ser maior que Data Fim.")
         return
-    agora = datetime.now(FORTALEZA_TZ)
-    st.markdown(f"**Horário local (Fortaleza):** {agora.strftime('%d/%m/%Y %H:%M:%S')}")
+
     chamados = list_chamados() or []
     if not chamados:
         st.info("Nenhum chamado técnico encontrado.")
         return
+
     df = pd.DataFrame(chamados)
     df["hora_abertura_dt"] = pd.to_datetime(
         df["hora_abertura"], format="%d/%m/%Y %H:%M:%S", errors="coerce"
     )
+
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_dt = datetime.combine(end_date, datetime.max.time())
     df_period = df[(df["hora_abertura_dt"] >= start_dt) & (df["hora_abertura_dt"] <= end_dt)]
     if filtro_ubs:
         df_period = df_period[df_period["ubs"].isin(filtro_ubs)]
+
     st.markdown("### Chamados Técnicos no Período")
     if not df_period.empty:
         st.dataframe(df_period)
     else:
         st.info("Sem chamados neste período.")
+
     abertos = df_period["hora_fechamento"].isnull().sum()
     fechados = df_period["hora_fechamento"].notnull().sum()
     st.markdown(f"**Chamados Abertos (período):** {abertos}")
     st.markdown(f"**Chamados Fechados (período):** {fechados}")
+
     def tempo_resolucao(row):
         if pd.notnull(row["hora_fechamento"]):
             try:
@@ -582,6 +567,7 @@ def relatorios_page():
             except:
                 return None
         return None
+
     df_period["tempo_resolucao_seg"] = df_period.apply(tempo_resolucao, axis=1)
     df_resolvidos = df_period.dropna(subset=["tempo_resolucao_seg"])
     if not df_resolvidos.empty:
@@ -591,7 +577,9 @@ def relatorios_page():
         st.markdown(f"**Tempo Médio de Resolução (horas úteis):** {horas}h {minutos}m")
     else:
         st.write("Nenhum chamado finalizado no período para calcular tempo médio.")
+
     st.markdown("---")
+
     if "tipo_defeito" in df_period.columns:
         chamados_tipo = df_period.groupby("tipo_defeito").size().reset_index(name="qtd")
         st.markdown("#### Chamados por Tipo de Defeito")
@@ -604,12 +592,16 @@ def relatorios_page():
             labels={"tipo_defeito": "Tipo de Defeito", "qtd": "Quantidade"},
         )
         st.plotly_chart(fig_tipo, use_container_width=True)
+
     st.markdown("---")
-    if "ubs" in df_period.columns and "setor" in df_period.columns:
+
+    if {"ubs", "setor"}.issubset(df_period.columns):
         chamados_ubs_setor = df_period.groupby(["ubs","setor"]).size().reset_index(name="qtd_chamados")
         st.markdown("#### Chamados por UBS e Setor")
         st.dataframe(chamados_ubs_setor)
+
     st.markdown("---")
+
     if not df_period.empty:
         df_period["dia_semana_en"] = df_period["hora_abertura_dt"].dt.day_name()
         day_map = {
