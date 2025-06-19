@@ -462,7 +462,7 @@ def administracao_page():
     st.subheader("Administração")
     admin_option = st.selectbox(
         "Opções de Administração",
-        ["Cadastro de Usuário", "Gerenciar UBSs", "Gerenciar Setores", "Lista de Usuários" "Redefinir Senha de Usuário"]
+        ["Cadastro de Usuário", "Gerenciar UBSs", "Gerenciar Setores", "Lista de Usuários", "Redefinir Senha de Usuário"]
     )
     if admin_option == "Cadastro de Usuário":
         novo_user = st.text_input("Novo Usuário")
