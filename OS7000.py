@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 import pytz
-
+import base64
 import streamlit as st
 from streamlit_option_menu import option_menu
 from st_aggrid import AgGrid, GridOptionsBuilder
@@ -15,7 +15,7 @@ from io import BytesIO
 FORTALEZA_TZ = pytz.timezone("America/Fortaleza")
 
 # Importação dos módulos internos (mantidos sem alterações)
-from autenticacao import authenticate, add_user, is_admin, list_users
+from autenticacao import authenticate, add_user, is_admin, list_users, force_change_password
 from chamados import (
     add_chamado,
     get_chamado_by_protocolo,
@@ -48,7 +48,7 @@ if "username" not in st.session_state:
 # Configuração da página (layout wide, favicon customizado)
 st.set_page_config(
     page_title="Gestão de Parque de Informática",
-    page_icon="gear.png",
+    page_icon="infocustec.png",
     layout="wide"
 )
 
@@ -74,12 +74,22 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Carrega (se existir) o logotipo
 logo_path = os.getenv("LOGO_PATH", "infocustec.png")
 if os.path.exists(logo_path):
-    st.image(logo_path, width=300)
+    with open(logo_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    st.markdown(
+        f"""
+        <div style="display: flex; justify-content: center; padding: 10px;">
+            <img src="data:image/png;base64,{b64}" style="height:80px;" />
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 else:
     st.warning("Logotipo não encontrado.")
+
+
 
 st.title("Gestão de Parque de Informática - APS ITAPIPOCA")
 
@@ -124,14 +134,8 @@ def build_menu():
             ]
         else:
             return [
-                "Dashboard",
                 "Abrir Chamado",
                 "Buscar Chamado",
-                "Chamados Técnicos",
-                "Inventário",
-                "Estoque",
-                "Relatórios",
-                "Exportar Dados",
                 "Sair"
             ]
     else:
@@ -215,7 +219,7 @@ def dashboard_page():
                 abertura = datetime.strptime(c["hora_abertura"], '%d/%m/%Y %H:%M:%S')
                 agora_local = datetime.now(FORTALEZA_TZ)
                 tempo_util = calculate_working_hours(abertura, agora_local)
-                if tempo_util > timedelta(hours=48):
+                if tempo_util > timedelta(hours=24):
                     atrasados.append(c)
             except:
                 pass
@@ -372,10 +376,12 @@ def chamados_tecnicos_page():
         df = df[cols]
 
     gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_default_column(filter=True, sortable=True, resizable=True)
-    gb.configure_pagination(paginationAutoPageSize=True)
+    gb.configure_default_column(filter=True, sortable=True, resizable=True, wrapText=True, autoHeight=True, minColumnWidth=250, flex=1)
+    gb.configure_column("problema", minColumnWidth=300)
+    gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=10)
     grid_options = gb.build()
-    AgGrid(df, gridOptions=grid_options, height=400, fit_columns_on_grid_load=True)
+    grid_options['domLayout'] = 'normal'
+    AgGrid(df, gridOptions=grid_options, enable_enterprise_modules=False, theme='streamlit', height=400)
     
     # Finalizar Chamado (para chamados em aberto)
     df_aberto = df[df["hora_fechamento"].isnull()]
@@ -456,7 +462,7 @@ def administracao_page():
     st.subheader("Administração")
     admin_option = st.selectbox(
         "Opções de Administração",
-        ["Cadastro de Usuário", "Gerenciar UBSs", "Gerenciar Setores", "Lista de Usuários"]
+        ["Cadastro de Usuário", "Gerenciar UBSs", "Gerenciar Setores", "Lista de Usuários", "Redefinir Senha de Usuário"]
     )
     if admin_option == "Cadastro de Usuário":
         novo_user = st.text_input("Novo Usuário")
@@ -479,6 +485,15 @@ def administracao_page():
             st.table(usuarios)
         else:
             st.write("Nenhum usuário cadastrado.")
+    elif admin_option == "Redefinir Senha de Usuário":
+        alvo = st.selectbox("Selecione o usuário", [u for u, _ in list_users()])
+        nova = st.text_input("Nova senha", type="password")
+        if st.button("Alterar senha") and nova:
+            ok = force_change_password(st.session_state["username"], alvo, nova)
+            if ok:
+                st.success("Senha redefinida!")
+            else:
+                st.error("Falha ao redefinir senha.")
 
 ####################################
 # 9) Página de Relatórios
