@@ -408,10 +408,21 @@ def chamados_tecnicos_page():
     prefer = [c for c in ["Prioridade", "protocolo", "ubs", "setor", "tipo_defeito", "problema",
                           "hora_abertura", "Tempo Útil", "idade_uteis_h", ">48h_uteis", "hora_fechamento"] if c in df.columns]
     others = [c for c in df.columns if c not in prefer]
-    df = df[prefer + others]
+    df = df[prefer + others].copy()
+
+    # ✅ Garantir tipos serializáveis
+    if "idade_uteis_h" in df.columns:
+        df["idade_uteis_h"] = pd.to_numeric(df["idade_uteis_h"], errors="coerce")
+    if ">48h_uteis" in df.columns:
+        df[">48h_uteis"] = df[">48h_uteis"].fillna(False).astype(bool)
+    if "Tempo Útil" in df.columns:
+        df["Tempo Útil"] = df["Tempo Útil"].astype(str)
+    if "Prioridade" in df.columns:
+        df["Prioridade"] = df["Prioridade"].astype(str)
 
     gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_default_column(filter=True, sortable=True, resizable=True, wrapText=True, autoHeight=True, minColumnWidth=180, flex=1)
+    gb.configure_default_column(filter=True, sortable=True, resizable=True, wrapText=True,
+                                autoHeight=True, minColumnWidth=180, flex=1)
     gb.configure_column("problema", minColumnWidth=320)
     gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=10)
 
@@ -426,9 +437,6 @@ def chamados_tecnicos_page():
     """)
     gb.configure_column("Prioridade", cellRenderer=cell_renderer_badge, pinned="left", width=140)
 
-    grid_options = gb.build()
-    grid_options["domLayout"] = "normal"
-
     # RowStyle para >48h (fundo rosado)
     get_row_style = JsCode("""
         function(params) {
@@ -438,9 +446,19 @@ def chamados_tecnicos_page():
             return null;
         }
     """)
-    grid_options["getRowStyle"] = get_row_style
+    gb.configure_grid_options(getRowStyle=get_row_style)
 
-    AgGrid(df, gridOptions=grid_options, enable_enterprise_modules=False, theme="streamlit", height=460)
+    grid_options = gb.build()
+    grid_options["domLayout"] = "normal"
+
+    AgGrid(
+        df,
+        gridOptions=grid_options,
+        enable_enterprise_modules=False,
+        theme="streamlit",
+        height=460,
+        allow_unsafe_jscode=True,   # << correção p/ permitir JS custom
+    )
 
     # ===== Ações =====
     # Finalizar (somente abertos)
