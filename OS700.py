@@ -1,7 +1,6 @@
 import os
 import logging
 import base64
-from io import BytesIO
 from datetime import datetime, timedelta
 
 import pytz
@@ -65,11 +64,6 @@ st.markdown(
     body { background-color: #F8FAFC; font-family: "Roboto", sans-serif; }
     h1, h2, h3 { color: #1F2937; }
     .css-1waiswl { background-color: #0275d8 !important; }
-    .badge {
-        display:inline-block; padding:2px 8px; border-radius:12px; font-size:12px; font-weight:600;
-    }
-    .badge-red { background:#dc2626; color:#fff; }
-    .badge-gray { background:#e5e7eb; color:#111827; }
     </style>
     """,
     unsafe_allow_html=True
@@ -164,7 +158,7 @@ selected = option_menu(
 )
 
 # =========================
-# Páginas
+# Página: Login
 # =========================
 def login_page():
     st.subheader("Login")
@@ -180,6 +174,9 @@ def login_page():
         else:
             st.error("Usuário ou senha incorretos.")
 
+# =========================
+# Página: Dashboard
+# =========================
 def dashboard_page():
     st.subheader("Dashboard - Administrativo")
     agora_fortaleza = datetime.now(FORTALEZA_TZ)
@@ -216,7 +213,7 @@ def dashboard_page():
     if atrasados:
         st.warning(f"Atenção: {atrasados} chamados abertos há mais de 48h úteis!")
 
-    # Tendências
+    # Tendência Mensal
     df["mes"] = df["hora_abertura_dt"].dt.to_period("M").astype(str)
     tendencia_mensal = df.groupby("mes").size().reset_index(name="qtd_mensal")
     st.markdown("### Tendência de Chamados por Mês")
@@ -224,6 +221,7 @@ def dashboard_page():
         fig_mensal = px.line(tendencia_mensal, x="mes", y="qtd_mensal", markers=True, title="Chamados por Mês")
         st.plotly_chart(fig_mensal, use_container_width=True)
 
+    # Tendência Semanal
     df["semana"] = df["hora_abertura_dt"].dt.to_period("W").astype(str)
     tendencia_semanal = df.groupby("semana").size().reset_index(name="qtd_semanal")
 
@@ -241,6 +239,9 @@ def dashboard_page():
         fig_semanal = px.line(tendencia_semanal, x="semana", y="qtd_semanal", markers=True, title="Chamados por Semana")
         st.plotly_chart(fig_semanal, use_container_width=True)
 
+# =========================
+# Página: Abrir Chamado
+# =========================
 def abrir_chamado_page():
     st.subheader("Abrir Chamado Técnico")
     patrimonio = st.text_input("Número de Patrimônio (opcional)")
@@ -298,6 +299,9 @@ def abrir_chamado_page():
         else:
             st.error("Erro ao abrir chamado.")
 
+# =========================
+# Página: Buscar Chamado
+# =========================
 def buscar_chamado_page():
     st.subheader("Buscar Chamado")
     protocolo = st.text_input("Informe o número de protocolo do chamado")
@@ -312,10 +316,13 @@ def buscar_chamado_page():
         else:
             st.warning("Informe um protocolo.")
 
+# =========================
+# Página: Chamados Técnicos
+# =========================
 def chamados_tecnicos_page():
     st.subheader("Chamados Técnicos")
 
-    # ----- Controles de filtro/priorização -----
+    # Filtros principais
     colf1, colf2, colf3 = st.columns([1.2, 1, 1])
     with colf1:
         mostrar = st.radio("Mostrar", ["Todos", "Somente em aberto"], index=0, horizontal=True)
@@ -332,17 +339,12 @@ def chamados_tecnicos_page():
 
     df = pd.DataFrame(chamados)
 
-    # Reordena colunas (protocolo antes de id)
-    if "protocolo" in df.columns and "id" in df.columns:
-        nova_ordem = ["protocolo", "id"] + [c for c in df.columns if c not in ["protocolo", "id"]]
-        df = df[nova_ordem]
-
-    # --------- Helpers internos ---------
+    # Helpers de status/tempo
     def _eh_fechado(v):
         return (pd.notna(v)) and (str(v).strip().lower() not in ("none", ""))
 
     def _idade_uteis_h(row):
-        # horas úteis desde a abertura até agora (se aberto) ou até o fechamento
+        # horas úteis desde a abertura até agora (se aberto) ou fechamento
         try:
             ab = datetime.strptime(row["hora_abertura"], "%d/%m/%Y %H:%M:%S")
             if _eh_fechado(row.get("hora_fechamento")):
@@ -357,15 +359,13 @@ def chamados_tecnicos_page():
 
     df["idade_uteis_h"] = df.apply(_idade_uteis_h, axis=1)
 
-    # Marcador >48h úteis (só relevante para abertos)
-    def _gt48(row):
-        if not _eh_fechado(row.get("hora_fechamento")) and row.get("idade_uteis_h") is not None:
-            return row["idade_uteis_h"] > 48
-        return False
+    # Flag >48h úteis (apenas se aberto)
+    df[">48h_uteis"] = df.apply(
+        lambda r: (not _eh_fechado(r.get("hora_fechamento"))) and r.get("idade_uteis_h") is not None and r["idade_uteis_h"] > 48,
+        axis=1
+    )
 
-    df[">48h_uteis"] = df.apply(_gt48, axis=1)
-
-    # Tempo Útil (texto)
+    # Tempo útil textual
     def _tempo_util_txt(row):
         try:
             ab = datetime.strptime(row["hora_abertura"], "%d/%m/%Y %H:%M:%S")
@@ -379,65 +379,50 @@ def chamados_tecnicos_page():
 
     df["Tempo Útil"] = df.apply(_tempo_util_txt, axis=1)
 
-    # Coluna de prioridade (badge)
-    df["Prioridade"] = df[">48h_uteis"].map(lambda v: "CRÍTICO >48h" if v else "Normal")
-
-    # --------- Filtro >48h ---------
+    # Filtro >48h (opcional)
     if apenas48:
         df = df[df[">48h_uteis"] == True]
 
-    # --------- Ordenação ---------
+    # Ordenação (priorizar >48h e mais antigos no topo)
     if priorizar48 and not df.empty:
         df = df.sort_values(by=[">48h_uteis", "idade_uteis_h"], ascending=[False, False])
     else:
         if "hora_abertura" in df.columns:
             try:
-                df["_ab"] = pd.to_datetime(df["hora_abertura"], format="%d/%m/%Y %H:%M:%S", errors="coerce")
-                df = df.sort_values("_ab", ascending=False).drop(columns=["_ab"])
+                _ab = pd.to_datetime(df["hora_abertura"], format="%d/%m/%Y %H:%M:%S", errors="coerce")
+                df = df.assign(_ab=_ab).sort_values("_ab", ascending=False).drop(columns=["_ab"])
             except Exception:
                 pass
 
-    # --------- Métricas ---------
+    # Métricas
     total = len(df)
     atrasados = int(df[">48h_uteis"].sum())
     c1, c2 = st.columns(2)
     c1.metric("Total listados", total)
     c2.metric("Abertos >48h úteis", atrasados)
 
-    # --------- Tabela (AG-Grid) com destaque visual ---------
-    prefer = [c for c in ["Prioridade", "protocolo", "ubs", "setor", "tipo_defeito", "problema",
+    # Reorganiza colunas úteis primeiro
+    prefer = [c for c in ["protocolo", "ubs", "setor", "tipo_defeito", "problema",
                           "hora_abertura", "Tempo Útil", "idade_uteis_h", ">48h_uteis", "hora_fechamento"] if c in df.columns]
     others = [c for c in df.columns if c not in prefer]
     df = df[prefer + others].copy()
 
-    # ✅ Garantir tipos serializáveis
+    # Tipos serializáveis pro AgGrid
     if "idade_uteis_h" in df.columns:
         df["idade_uteis_h"] = pd.to_numeric(df["idade_uteis_h"], errors="coerce")
     if ">48h_uteis" in df.columns:
         df[">48h_uteis"] = df[">48h_uteis"].fillna(False).astype(bool)
     if "Tempo Útil" in df.columns:
         df["Tempo Útil"] = df["Tempo Útil"].astype(str)
-    if "Prioridade" in df.columns:
-        df["Prioridade"] = df["Prioridade"].astype(str)
 
+    # Grid
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(filter=True, sortable=True, resizable=True, wrapText=True,
                                 autoHeight=True, minColumnWidth=180, flex=1)
     gb.configure_column("problema", minColumnWidth=320)
     gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=10)
 
-    # Badge na coluna Prioridade
-    cell_renderer_badge = JsCode("""
-        function(params) {
-            if (params.value && String(params.value).toLowerCase().includes("crítico")) {
-                return '<span class="badge badge-red">' + params.value + '</span>';
-            }
-            return '<span class="badge badge-gray">' + (params.value || '') + '</span>';
-        }
-    """)
-    gb.configure_column("Prioridade", cellRenderer=cell_renderer_badge, pinned="left", width=140)
-
-    # RowStyle para >48h (fundo rosado)
+    # Destaque visual pra >48h
     get_row_style = JsCode("""
         function(params) {
             if (params.data && params.data[">48h_uteis"] === true) {
@@ -457,7 +442,7 @@ def chamados_tecnicos_page():
         enable_enterprise_modules=False,
         theme="streamlit",
         height=460,
-        allow_unsafe_jscode=True,   # << correção p/ permitir JS custom
+        allow_unsafe_jscode=True,  # necessário para o JS de estilo
     )
 
     # ===== Ações =====
@@ -523,6 +508,9 @@ def chamados_tecnicos_page():
         if st.button("Reabrir Chamado"):
             reabrir_chamado(int(chamado_fechado_id), remover_historico=remover_hist)
 
+# =========================
+# Página: Inventário
+# =========================
 def inventario_page():
     st.subheader("Inventário")
     menu_inventario = st.radio("Selecione uma opção:", ["Listar Inventário", "Cadastrar Máquina", "Dashboard Inventário"])
@@ -533,9 +521,15 @@ def inventario_page():
     else:
         dashboard_inventario()
 
+# =========================
+# Página: Estoque
+# =========================
 def estoque_page():
     manage_estoque()
 
+# =========================
+# Página: Administração
+# =========================
 def administracao_page():
     st.subheader("Administração")
     admin_option = st.selectbox(
@@ -574,6 +568,9 @@ def administracao_page():
             else:
                 st.error("Falha ao redefinir senha.")
 
+# =========================
+# Página: Relatórios
+# =========================
 def relatorios_page():
     st.subheader("Relatórios Completos - Estatísticas")
     st.markdown("### Filtros para Chamados")
@@ -707,6 +704,9 @@ def relatorios_page():
             mime="application/pdf"
         )
 
+# =========================
+# Página: Exportar Dados
+# =========================
 def exportar_dados_page():
     st.subheader("Exportar Dados")
     st.markdown("### Exportar Chamados em CSV")
@@ -727,6 +727,9 @@ def exportar_dados_page():
     else:
         st.write("Nenhum item de inventário para exportar.")
 
+# =========================
+# Página: Sair
+# =========================
 def sair_page():
     st.session_state["logged_in"] = False
     st.session_state["username"] = ""
