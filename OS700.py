@@ -1,20 +1,32 @@
 import os
 import logging
+import base64
+from io import BytesIO
+from datetime import datetime, timedelta
+
+import pytz
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timedelta
-import pytz
-import base64
 import streamlit as st
-from streamlit_option_menu import option_menu
-from st_aggrid import AgGrid, GridOptionsBuilder
 from fpdf import FPDF
-from io import BytesIO
+from streamlit_option_menu import option_menu
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
-# Define o fuso horário de Fortaleza
+# =========================
+# Configs básicas
+# =========================
 FORTALEZA_TZ = pytz.timezone("America/Fortaleza")
+logging.basicConfig(level=logging.INFO)
 
-# Importação dos módulos internos (mantidos sem alterações)
+st.set_page_config(
+    page_title="Gestão de Parque de Informática",
+    page_icon="infocustec.png",
+    layout="wide"
+)
+
+# =========================
+# Módulos internos
+# =========================
 from autenticacao import authenticate, add_user, is_admin, list_users, force_change_password
 from chamados import (
     add_chamado,
@@ -36,51 +48,43 @@ from ubs import get_ubs_list
 from setores import get_setores_list
 from estoque import manage_estoque, get_estoque
 
-# Configuração de logging
-logging.basicConfig(level=logging.INFO)
-
-# Inicialização da sessão (variáveis de login)
+# =========================
+# Estado de sessão
+# =========================
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 if "username" not in st.session_state:
     st.session_state["username"] = ""
 
-# Configuração da página (layout wide, favicon customizado)
-st.set_page_config(
-    page_title="Gestão de Parque de Informática",
-    page_icon="infocustec.png",
-    layout="wide"
-)
-
-# Injeção de CSS Customizado (cores, fontes, estilos)
+# =========================
+# CSS leve
+# =========================
 st.markdown(
     """
     <style>
-    body {
-      background-color: #F8FAFC;
-      font-family: "Roboto", sans-serif;
+    body { background-color: #F8FAFC; font-family: "Roboto", sans-serif; }
+    h1, h2, h3 { color: #1F2937; }
+    .css-1waiswl { background-color: #0275d8 !important; }
+    .badge {
+        display:inline-block; padding:2px 8px; border-radius:12px; font-size:12px; font-weight:600;
     }
-    .css-18e3th9 {
-      padding: 1.5rem 1.5rem 2rem 1.5rem; /* Ajuste de padding do container principal */
-    }
-    h1, h2, h3 {
-      color: #1F2937; /* Um cinza escuro */
-    }
-    .css-1waiswl {
-      background-color: #0275d8 !important; /* Azul do menu selecionado */
-    }
+    .badge-red { background:#dc2626; color:#fff; }
+    .badge-gray { background:#e5e7eb; color:#111827; }
     </style>
     """,
     unsafe_allow_html=True
 )
 
+# =========================
+# Logo
+# =========================
 logo_path = os.getenv("LOGO_PATH", "infocustec.png")
 if os.path.exists(logo_path):
     with open(logo_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
     st.markdown(
         f"""
-        <div style="display: flex; justify-content: center; padding: 10px;">
+        <div style="display:flex;justify-content:center;padding:10px;">
             <img src="data:image/png;base64,{b64}" style="height:80px;" />
         </div>
         """,
@@ -89,14 +93,12 @@ if os.path.exists(logo_path):
 else:
     st.warning("Logotipo não encontrado.")
 
-
-
 st.title("Gestão de Parque de Informática - APS ITAPIPOCA")
 
-####################################
-# Função Auxiliar para Exibir Chamado
-####################################
-def exibir_chamado(chamado):
+# =========================
+# Helpers
+# =========================
+def exibir_chamado(chamado: dict):
     st.markdown("### Detalhes do Chamado")
     col1, col2 = st.columns(2)
     with col1:
@@ -114,9 +116,6 @@ def exibir_chamado(chamado):
         st.markdown("### Solução")
         st.markdown(chamado["solucao"])
 
-####################################
-# Monta o Menu Principal
-####################################
 def build_menu():
     if st.session_state["logged_in"]:
         if is_admin(st.session_state["username"]):
@@ -133,31 +132,25 @@ def build_menu():
                 "Sair"
             ]
         else:
-            return [
-                "Abrir Chamado",
-                "Buscar Chamado",
-                "Sair"
-            ]
+            return ["Abrir Chamado", "Buscar Chamado", "Sair"]
     else:
         return ["Login"]
 
 menu_options = build_menu()
-
-# Cria menu horizontal com streamlit-option-menu
 selected = option_menu(
     menu_title=None,
     options=menu_options,
     icons=[
-        "speedometer",  # Dashboard
-        "chat-left-text",  # Abrir Chamado
-        "search",           # Buscar Chamado
-        "card-list",        # Chamados Técnicos
-        "clipboard-data",   # Inventário
-        "box-seam",         # Estoque
-        "gear",             # Administração
-        "bar-chart-line",   # Relatórios
-        "download",         # Exportar Dados
-        "box-arrow-right"   # Sair
+        "speedometer",
+        "chat-left-text",
+        "search",
+        "card-list",
+        "clipboard-data",
+        "box-seam",
+        "gear",
+        "bar-chart-line",
+        "download",
+        "box-arrow-right"
     ],
     menu_icon="cast",
     default_index=0,
@@ -170,9 +163,9 @@ selected = option_menu(
     }
 )
 
-####################################
-# 1) Página de Login
-####################################
+# =========================
+# Páginas
+# =========================
 def login_page():
     st.subheader("Login")
     username = st.text_input("Usuário")
@@ -187,9 +180,6 @@ def login_page():
         else:
             st.error("Usuário ou senha incorretos.")
 
-####################################
-# 2) Página de Dashboard (Tendência Mensal e Semanal)
-####################################
 def dashboard_page():
     st.subheader("Dashboard - Administrativo")
     agora_fortaleza = datetime.now(FORTALEZA_TZ)
@@ -211,39 +201,33 @@ def dashboard_page():
     col2.metric("Em Aberto", abertos)
     col3.metric("Fechados", fechados)
 
-    # Identifica chamados atrasados (mais de 48h úteis)
-    atrasados = []
+    # Atrasados (>48h úteis)
+    atrasados = 0
     for c in chamados:
         if c.get("hora_fechamento") is None:
             try:
                 abertura = datetime.strptime(c["hora_abertura"], '%d/%m/%Y %H:%M:%S')
                 agora_local = datetime.now(FORTALEZA_TZ)
                 tempo_util = calculate_working_hours(abertura, agora_local)
-                if tempo_util > timedelta(hours=24):
-                    atrasados.append(c)
+                if tempo_util > timedelta(hours=48):
+                    atrasados += 1
             except:
                 pass
     if atrasados:
-        st.warning(f"Atenção: {len(atrasados)} chamados abertos há mais de 48h úteis!")
+        st.warning(f"Atenção: {atrasados} chamados abertos há mais de 48h úteis!")
 
-    # Tendência Mensal
+    # Tendências
     df["mes"] = df["hora_abertura_dt"].dt.to_period("M").astype(str)
     tendencia_mensal = df.groupby("mes").size().reset_index(name="qtd_mensal")
     st.markdown("### Tendência de Chamados por Mês")
     if not tendencia_mensal.empty:
         fig_mensal = px.line(tendencia_mensal, x="mes", y="qtd_mensal", markers=True, title="Chamados por Mês")
         st.plotly_chart(fig_mensal, use_container_width=True)
-    else:
-        st.info("Sem dados suficientes para exibir tendência mensal.")
 
-    # Tendência Semanal
     df["semana"] = df["hora_abertura_dt"].dt.to_period("W").astype(str)
     tendencia_semanal = df.groupby("semana").size().reset_index(name="qtd_semanal")
 
-    # Para ordenar corretamente no eixo X (semana = '2023-23' etc.), criamos col auxiliar "ano_semana"
     def parse_ano_semana(semana_str):
-        # '2023-23' -> (2023, 23)
-        # Se der erro, retorna (9999, 9999) p/ não travar
         try:
             ano, wk = semana_str.split("-")
             return (int(ano), int(wk))
@@ -256,12 +240,7 @@ def dashboard_page():
     if not tendencia_semanal.empty:
         fig_semanal = px.line(tendencia_semanal, x="semana", y="qtd_semanal", markers=True, title="Chamados por Semana")
         st.plotly_chart(fig_semanal, use_container_width=True)
-    else:
-        st.info("Sem dados suficientes para exibir tendência semanal.")
 
-####################################
-# 3) Página de Abrir Chamado
-####################################
 def abrir_chamado_page():
     st.subheader("Abrir Chamado Técnico")
     patrimonio = st.text_input("Número de Patrimônio (opcional)")
@@ -319,9 +298,6 @@ def abrir_chamado_page():
         else:
             st.error("Erro ao abrir chamado.")
 
-####################################
-# 4) Página de Buscar Chamado
-####################################
 def buscar_chamado_page():
     st.subheader("Buscar Chamado")
     protocolo = st.text_input("Informe o número de protocolo do chamado")
@@ -336,67 +312,158 @@ def buscar_chamado_page():
         else:
             st.warning("Informe um protocolo.")
 
-####################################
-# 5) Página de Chamados Técnicos (Finalizar e Reabrir)
-####################################
 def chamados_tecnicos_page():
     st.subheader("Chamados Técnicos")
-    chamados = list_chamados()
+
+    # ----- Controles de filtro/priorização -----
+    colf1, colf2, colf3 = st.columns([1.2, 1, 1])
+    with colf1:
+        mostrar = st.radio("Mostrar", ["Todos", "Somente em aberto"], index=0, horizontal=True)
+    with colf2:
+        apenas48 = st.toggle("Apenas >48h úteis", value=False)
+    with colf3:
+        priorizar48 = st.toggle("Priorizar >48h úteis", value=True)
+
+    # Fonte de dados
+    chamados = list_chamados_em_aberto() if mostrar == "Somente em aberto" else list_chamados()
     if not chamados:
-        st.write("Nenhum chamado técnico encontrado.")
+        st.success("Sem chamados em aberto 🎉" if mostrar == "Somente em aberto" else "Nenhum chamado encontrado.")
         return
 
     df = pd.DataFrame(chamados)
-    # Reordena colunas para mostrar protocolo antes de id
+
+    # Reordena colunas (protocolo antes de id)
     if "protocolo" in df.columns and "id" in df.columns:
-        nova_ordem = ["protocolo", "id"] + [col for col in df.columns if col not in ["protocolo", "id"]]
+        nova_ordem = ["protocolo", "id"] + [c for c in df.columns if c not in ["protocolo", "id"]]
         df = df[nova_ordem]
 
-    def calcula_tempo(row):
-        if pd.notnull(row.get("hora_fechamento")):
+    # --------- Helpers internos ---------
+    def _eh_fechado(v):
+        return (pd.notna(v)) and (str(v).strip().lower() not in ("none", ""))
+
+    def _idade_uteis_h(row):
+        # horas úteis desde a abertura até agora (se aberto) ou até o fechamento
+        try:
+            ab = datetime.strptime(row["hora_abertura"], "%d/%m/%Y %H:%M:%S")
+            if _eh_fechado(row.get("hora_fechamento")):
+                fe = datetime.strptime(row["hora_fechamento"], "%d/%m/%Y %H:%M:%S")
+                delta = calculate_working_hours(ab, fe)
+            else:
+                agora_local = datetime.now(FORTALEZA_TZ)
+                delta = calculate_working_hours(ab, agora_local)
+            return round(delta.total_seconds() / 3600.0, 2)
+        except Exception:
+            return None
+
+    df["idade_uteis_h"] = df.apply(_idade_uteis_h, axis=1)
+
+    # Marcador >48h úteis (só relevante para abertos)
+    def _gt48(row):
+        if not _eh_fechado(row.get("hora_fechamento")) and row.get("idade_uteis_h") is not None:
+            return row["idade_uteis_h"] > 48
+        return False
+
+    df[">48h_uteis"] = df.apply(_gt48, axis=1)
+
+    # Tempo Útil (texto)
+    def _tempo_util_txt(row):
+        try:
+            ab = datetime.strptime(row["hora_abertura"], "%d/%m/%Y %H:%M:%S")
+            if _eh_fechado(row.get("hora_fechamento")):
+                fe = datetime.strptime(row["hora_fechamento"], "%d/%m/%Y %H:%M:%S")
+                return str(calculate_working_hours(ab, fe))
+            else:
+                return "Em aberto"
+        except Exception:
+            return "Erro"
+
+    df["Tempo Útil"] = df.apply(_tempo_util_txt, axis=1)
+
+    # Coluna de prioridade (badge)
+    df["Prioridade"] = df[">48h_uteis"].map(lambda v: "CRÍTICO >48h" if v else "Normal")
+
+    # --------- Filtro >48h ---------
+    if apenas48:
+        df = df[df[">48h_uteis"] == True]
+
+    # --------- Ordenação ---------
+    if priorizar48 and not df.empty:
+        df = df.sort_values(by=[">48h_uteis", "idade_uteis_h"], ascending=[False, False])
+    else:
+        if "hora_abertura" in df.columns:
             try:
-                abertura = datetime.strptime(row["hora_abertura"], '%d/%m/%Y %H:%M:%S')
-                fechamento = datetime.strptime(row["hora_fechamento"], '%d/%m/%Y %H:%M:%S')
-                tempo_util = calculate_working_hours(abertura, fechamento)
-                return str(tempo_util)
-            except:
-                return "Erro"
-        else:
-            return "Em aberto"
+                df["_ab"] = pd.to_datetime(df["hora_abertura"], format="%d/%m/%Y %H:%M:%S", errors="coerce")
+                df = df.sort_values("_ab", ascending=False).drop(columns=["_ab"])
+            except Exception:
+                pass
 
-    df["Tempo Util"] = df.apply(calcula_tempo, axis=1)
+    # --------- Métricas ---------
+    total = len(df)
+    atrasados = int(df[">48h_uteis"].sum())
+    c1, c2 = st.columns(2)
+    c1.metric("Total listados", total)
+    c2.metric("Abertos >48h úteis", atrasados)
 
-    # Reordena para que "Tempo Util" apareça logo após "patrimonio"
-    if "patrimonio" in df.columns:
-        cols = list(df.columns)
-        if "Tempo Util" in cols:
-            cols.remove("Tempo Util")
-        idx = cols.index("patrimonio")
-        cols.insert(idx+1, "Tempo Util")
-        df = df[cols]
+    # --------- Tabela (AG-Grid) com destaque visual ---------
+    prefer = [c for c in ["Prioridade", "protocolo", "ubs", "setor", "tipo_defeito", "problema",
+                          "hora_abertura", "Tempo Útil", "idade_uteis_h", ">48h_uteis", "hora_fechamento"] if c in df.columns]
+    others = [c for c in df.columns if c not in prefer]
+    df = df[prefer + others]
 
     gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_default_column(filter=True, sortable=True, resizable=True, wrapText=True, autoHeight=True, minColumnWidth=250, flex=1)
-    gb.configure_column("problema", minColumnWidth=300)
+    gb.configure_default_column(filter=True, sortable=True, resizable=True, wrapText=True, autoHeight=True, minColumnWidth=180, flex=1)
+    gb.configure_column("problema", minColumnWidth=320)
     gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=10)
+
+    # Badge na coluna Prioridade
+    cell_renderer_badge = JsCode("""
+        function(params) {
+            if (params.value && String(params.value).toLowerCase().includes("crítico")) {
+                return '<span class="badge badge-red">' + params.value + '</span>';
+            }
+            return '<span class="badge badge-gray">' + (params.value || '') + '</span>';
+        }
+    """)
+    gb.configure_column("Prioridade", cellRenderer=cell_renderer_badge, pinned="left", width=140)
+
     grid_options = gb.build()
-    grid_options['domLayout'] = 'normal'
-    AgGrid(df, gridOptions=grid_options, enable_enterprise_modules=False, theme='streamlit', height=400)
-    
-    # Finalizar Chamado (para chamados em aberto)
-    df_aberto = df[df["hora_fechamento"].isnull()]
+    grid_options["domLayout"] = "normal"
+
+    # RowStyle para >48h (fundo rosado)
+    get_row_style = JsCode("""
+        function(params) {
+            if (params.data && params.data[">48h_uteis"] === true) {
+                return { 'background': '#ffe6e6' };
+            }
+            return null;
+        }
+    """)
+    grid_options["getRowStyle"] = get_row_style
+
+    AgGrid(df, gridOptions=grid_options, enable_enterprise_modules=False, theme="streamlit", height=460)
+
+    # ===== Ações =====
+    # Finalizar (somente abertos)
+    if mostrar == "Somente em aberto":
+        df_aberto = df.copy()
+    else:
+        df_aberto = df[df["Tempo Útil"] == "Em aberto"]
+
     if df_aberto.empty:
         st.write("Não há chamados abertos para finalizar.")
     else:
         st.markdown("### Finalizar Chamado Técnico")
         chamado_id = st.selectbox("Selecione o ID do chamado para finalizar", df_aberto["id"].tolist())
         chamado = df_aberto[df_aberto["id"] == chamado_id].iloc[0]
-        st.write(f"Problema: {chamado['problema']}")
+        st.write(f"Problema: {chamado.get('problema','(sem descrição)')}")
 
-        if "impressora" in chamado.get("tipo_defeito", "").lower():
+        # Opções de solução conforme tipo
+        if "impressora" in str(chamado.get("tipo_defeito","")).lower():
             solucao_options = [
-                "Limpeza e recalibração da impressora", "Substituição de cartucho/toner",
-                "Verificação de conexão e drivers", "Reinicialização da impressora"
+                "Limpeza e recalibração da impressora",
+                "Substituição de cartucho/toner",
+                "Verificação de conexão e drivers",
+                "Reinicialização da impressora"
             ]
         else:
             solucao_options = [
@@ -412,33 +479,32 @@ def chamados_tecnicos_page():
                 "Reset da BIOS"
             ]
         solucao_selecionada = st.selectbox("Selecione a solução", solucao_options)
-        solucao_complementar = st.text_area("Detalhes adicionais da solução (opcional)")
-        solucao_final = solucao_selecionada + ((" - " + solucao_complementar) if solucao_complementar else "")
-        comentarios = st.text_area("Comentários adicionais (opcional)")
+        solucao_complementar = st.text_area("Detalhes adicionais (opcional)")
+        comentarios = st.text_area("Comentários (opcional)")
 
+        # Peças usadas
         estoque_data = get_estoque()
         pieces_list = [item["nome"] for item in estoque_data] if estoque_data else []
-        pecas_selecionadas = st.multiselect("Selecione as peças utilizadas (se houver)", pieces_list)
+        pecas_selecionadas = st.multiselect("Peças utilizadas (se houver)", pieces_list)
 
         if st.button("Finalizar Chamado"):
+            solucao_final = solucao_selecionada + (f" - {solucao_complementar}" if solucao_complementar else "")
             if solucao_final:
-                solucao_completa = solucao_final + (f" | Comentários: {comentarios}" if comentarios else "")
-                finalizar_chamado(chamado_id, solucao_completa, pecas_usadas=pecas_selecionadas)
+                if comentarios:
+                    solucao_final += f" | Comentários: {comentarios}"
+                finalizar_chamado(int(chamado_id), solucao_final, pecas_usadas=pecas_selecionadas)
             else:
                 st.error("Informe a solução para finalizar o chamado.")
 
-    # Reabrir Chamado (para chamados fechados)
-    df_fechado = df[df["hora_fechamento"].notnull()]
+    # Reabrir (quando mostrando "Todos" e houver fechados)
+    df_fechado = df[df["Tempo Útil"] != "Em aberto"] if mostrar == "Todos" else pd.DataFrame()
     if not df_fechado.empty:
         st.markdown("### Reabrir Chamado Técnico")
         chamado_fechado_id = st.selectbox("Selecione o ID do chamado para reabrir", df_fechado["id"].tolist())
         remover_hist = st.checkbox("Remover registro de manutenção criado no fechamento anterior?", value=False)
         if st.button("Reabrir Chamado"):
-            reabrir_chamado(chamado_fechado_id, remover_historico=remover_hist)
+            reabrir_chamado(int(chamado_fechado_id), remover_historico=remover_hist)
 
-####################################
-# 6) Página de Inventário
-####################################
 def inventario_page():
     st.subheader("Inventário")
     menu_inventario = st.radio("Selecione uma opção:", ["Listar Inventário", "Cadastrar Máquina", "Dashboard Inventário"])
@@ -449,15 +515,9 @@ def inventario_page():
     else:
         dashboard_inventario()
 
-####################################
-# 7) Página de Estoque
-####################################
 def estoque_page():
     manage_estoque()
 
-####################################
-# 8) Página de Administração
-####################################
 def administracao_page():
     st.subheader("Administração")
     admin_option = st.selectbox(
@@ -486,18 +546,16 @@ def administracao_page():
         else:
             st.write("Nenhum usuário cadastrado.")
     elif admin_option == "Redefinir Senha de Usuário":
-        alvo = st.selectbox("Selecione o usuário", [u for u, _ in list_users()])
+        usuarios = list_users()
+        alvo = st.selectbox("Selecione o usuário", [u for u, _ in usuarios] if usuarios else [])
         nova = st.text_input("Nova senha", type="password")
-        if st.button("Alterar senha") and nova:
+        if st.button("Alterar senha") and nova and alvo:
             ok = force_change_password(st.session_state["username"], alvo, nova)
             if ok:
                 st.success("Senha redefinida!")
             else:
                 st.error("Falha ao redefinir senha.")
 
-####################################
-# 9) Página de Relatórios
-####################################
 def relatorios_page():
     st.subheader("Relatórios Completos - Estatísticas")
     st.markdown("### Filtros para Chamados")
@@ -566,7 +624,6 @@ def relatorios_page():
     else:
         st.write("Nenhum chamado finalizado no período para calcular tempo médio de resolução.")
 
-    # Chamados por Tipo de Defeito
     if "tipo_defeito" in df_period.columns:
         chamados_tipo = df_period.groupby("tipo_defeito").size().reset_index(name="qtd")
         st.markdown("#### Chamados por Tipo de Defeito")
@@ -575,12 +632,10 @@ def relatorios_page():
         fig_tipo.update_layout(xaxis_title="Tipo de Defeito", yaxis_title="Quantidade")
         st.plotly_chart(fig_tipo, use_container_width=True)
 
-    # Chamados por UBS e Setor
     chamados_ubs_setor = df_period.groupby(["ubs", "setor"]).size().reset_index(name="qtd_chamados")
     st.markdown("#### Chamados por UBS e Setor")
     st.dataframe(chamados_ubs_setor)
 
-    # Chamados por Dia da Semana (em português)
     if not df_period.empty:
         df_period["dia_semana_en"] = df_period["hora_abertura_dt"].dt.day_name()
         day_map = {
@@ -598,7 +653,6 @@ def relatorios_page():
         st.markdown("#### Chamados por Dia da Semana")
         st.dataframe(chamados_por_dia)
 
-    # Chamados por UBS por Mês
     chamados_ubs_mes = df_period.groupby(["ubs", "mes"]).size().reset_index(name="qtd_chamados")
     st.markdown("#### Chamados por UBS por Mês")
     st.dataframe(chamados_ubs_mes)
@@ -608,22 +662,21 @@ def relatorios_page():
         fig1.update_layout(xaxis_title="Mês", yaxis_title="Quantidade")
         st.plotly_chart(fig1, use_container_width=True)
 
-    # Geração do PDF completo de chamados
     if st.button("Gerar Relatório Completo de Chamados em PDF"):
         df_chamados = df_period.copy()
         pdf = FPDF()
         pdf.add_page()
-        pdf.image("infocustec.png", x=10, y=8, w=30)
+        if os.path.exists("infocustec.png"):
+            pdf.image("infocustec.png", x=10, y=8, w=30)
         pdf.ln(35)
         pdf.set_font("Arial", "B", 16)
         pdf.cell(0, 10, "Relatório Completo de Chamados Técnicos", ln=True, align="C")
         pdf.ln(10)
         pdf.set_font("Arial", "", 10)
-        for idx, row in df_chamados.iterrows():
+        for _, row in df_chamados.iterrows():
             for col in df_chamados.columns:
                 pdf.cell(0, 8, f'{col}: {row[col]}', ln=True)
             pdf.ln(5)
-
         pdf_output = pdf.output(dest="S")
         if isinstance(pdf_output, str):
             pdf_output = pdf_output.encode("latin-1")
@@ -636,9 +689,6 @@ def relatorios_page():
             mime="application/pdf"
         )
 
-####################################
-# 10) Página de Exportar Dados
-####################################
 def exportar_dados_page():
     st.subheader("Exportar Dados")
     st.markdown("### Exportar Chamados em CSV")
@@ -659,17 +709,14 @@ def exportar_dados_page():
     else:
         st.write("Nenhum item de inventário para exportar.")
 
-####################################
-# 11) Função Sair
-####################################
 def sair_page():
     st.session_state["logged_in"] = False
     st.session_state["username"] = ""
     st.success("Você saiu.")
 
-####################################
-# Mapeamento das Páginas
-####################################
+# =========================
+# Roteamento
+# =========================
 pages = {
     "Login": login_page,
     "Dashboard": dashboard_page,
@@ -684,12 +731,13 @@ pages = {
     "Sair": sair_page
 }
 
-# Chama a página selecionada
 if selected in pages:
     pages[selected]()
 else:
     st.write("Página não encontrada.")
 
+# =========================
 # Rodapé
+# =========================
 st.markdown("---")
 st.markdown("<center>© 2025 Infocustec. Todos os direitos reservados.</center>", unsafe_allow_html=True)
