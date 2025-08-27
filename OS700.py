@@ -87,7 +87,7 @@ if os.path.exists(logo_path):
 else:
     st.warning("Logotipo não encontrado.")
 
-st.title("Gestão de Parque de Informática - APS ITAPIPOCA")
+st.title("Gestão de Parque de Informática - APS ITAPAJÉ")
 
 # =========================
 # Helpers
