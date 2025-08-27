@@ -1,12 +1,14 @@
-import streamlit as st
-import pandas as pd
-import base64
-import pytz
-from datetime import datetime
-from st_aggrid import AgGrid, GridOptionsBuilder
-import matplotlib.pyplot as plt
-from fpdf import FPDF
+# inventario.py — organizado, sem fotos, com PDF/Excel/CSV
+import io
 import os
+from datetime import datetime
+import pandas as pd
+import numpy as np
+import pytz
+import streamlit as st
+import matplotlib.pyplot as plt
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+from fpdf import FPDF
 
 from supabase_client import supabase
 from setores import get_setores_list
@@ -14,11 +16,13 @@ from ubs import get_ubs_list
 
 FORTALEZA_TZ = pytz.timezone("America/Fortaleza")
 
-###########################
-# 1. Funções Básicas
-###########################
-
+# =====================================================
+# 1) Acesso ao banco
+# =====================================================
 def get_machines_from_inventory():
+    """
+    Lê a tabela public.inventario com os campos usados no app.
+    """
     try:
         resp = supabase.table("inventario").select(
             "id,numero_patrimonio,tipo,marca,modelo,numero_serie,status,localizacao,propria_locada,setor,data_aquisicao,data_garantia_fim"
@@ -43,6 +47,7 @@ def add_machine_to_inventory(
     data_aquisicao=None, data_garantia_fim=None
 ):
     try:
+        # evita duplicidade por patrimonio
         resp = supabase.table("inventario").select("numero_patrimonio").eq("numero_patrimonio", patrimonio).execute()
         if resp.data:
             st.error(f"Máquina com patrimônio {patrimonio} já existe no inventário.")
@@ -74,11 +79,9 @@ def delete_inventory_item(patrimonio):
         st.error("Erro ao excluir item do inventário.")
         print(f"Erro: {e}")
 
-
-###########################
-# 2. Peças Usadas
-###########################
-
+# =====================================================
+# 2) Integrações com chamados / peças / manutenção
+# =====================================================
 def get_pecas_usadas_por_patrimonio(patrimonio):
     try:
         mod = __import__("chamados", fromlist=["get_chamados_por_patrimonio"])
@@ -92,17 +95,14 @@ def get_pecas_usadas_por_patrimonio(patrimonio):
         return []
     chamado_ids = [ch["id"] for ch in chamados if "id" in ch]
     try:
+        if not chamado_ids:
+            return []
         resp = supabase.table("pecas_usadas").select("*").in_("chamado_id", chamado_ids).execute()
         return resp.data if resp.data else []
     except Exception as e:
         st.error("Erro ao recuperar peças utilizadas.")
         print(f"Erro: {e}")
         return []
-
-
-###########################
-# 3. Histórico de Manutenção
-###########################
 
 def get_historico_manutencao_por_patrimonio(patrimonio):
     try:
@@ -113,225 +113,282 @@ def get_historico_manutencao_por_patrimonio(patrimonio):
         print(f"Erro: {e}")
         return []
 
-
-###########################
-# 4. Cadastro de Máquina
-###########################
-
+# =====================================================
+# 3) Cadastro / Edição (layout limpo, sem fotos)
+# =====================================================
 def cadastro_maquina():
-    st.subheader("Cadastrar Máquina no Inventário")
+    st.subheader("Cadastrar / Atualizar Máquina")
 
-    tipo_options = ["Computador", "Impressora", "Monitor", "Nobreak", "Outro"]
-    tipo = st.selectbox("Tipo de Equipamento", tipo_options)
+    tab1, tab2, tab3 = st.tabs(["Básico", "Configuração", "Compra/Docs"])
 
-    marca = st.text_input("Marca")
-    modelo = st.text_input("Modelo")
-    numero_serie = st.text_input("Número de Série (Opcional)")
+    with tab1:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            patrimonio = st.text_input("Número de Patrimônio*")
+        with c2:
+            tipo = st.selectbox("Tipo*", ["Computador", "Impressora", "Monitor", "Nobreak", "Outro"])
+        with c3:
+            status = st.selectbox("Status", ["Ativo", "Em Manutencao", "Inativo"], index=0)
 
-    patrimonio = st.text_input("Número de Patrimônio")
+        c4, c5, c6 = st.columns(3)
+        with c4:
+            marca = st.text_input("Marca")
+        with c5:
+            modelo = st.text_input("Modelo")
+        with c6:
+            numero_serie = st.text_input("Número de Série (Opcional)")
 
-    status_options = ["Ativo", "Em Manutencao", "Inativo"]
-    status = st.selectbox("Status", status_options)
+        c7, c8 = st.columns(2)
+        with c7:
+            localizacao = st.selectbox("Localização (UBS)", sorted(get_ubs_list()))
+        with c8:
+            setor = st.selectbox("Setor", sorted(get_setores_list()))
 
-    ubs_list = get_ubs_list()
-    localizacao = st.selectbox("Localização (UBS)", sorted(ubs_list))
+        propria_locada = st.selectbox("Propriedade", ["Propria", "Locada"], index=0)
+        st.caption("* Campos obrigatórios")
 
-    setores_list = get_setores_list()
-    setor = st.selectbox("Setor", sorted(setores_list))
+    with tab2:
+        st.caption("Campos de configuração (opcional).")
+        # se no futuro quiser hostname/ip/etc., adicionar aqui
+        pass
 
-    propria_options = ["Propria", "Locada"]
-    propria_locada = st.selectbox("Própria ou Locada", propria_options)
+    with tab3:
+        colA, colB = st.columns(2)
+        with colA:
+            data_aquisicao = st.date_input("Data de Aquisição", value=None, format="DD/MM/YYYY")
+        with colB:
+            data_garantia_fim = st.date_input("Garantia até", value=None, format="DD/MM/YYYY")
 
-    uploaded_file = st.file_uploader("Foto opcional da máquina", type=["png","jpg","jpeg"])
+    colS, colU, colD = st.columns([1,1,1])
+    salvar = colS.button("Salvar novo", type="primary")
+    atualizar = colU.button("Atualizar existente")
+    limpar = colD.button("Limpar formulário")
 
-    if st.button("Cadastrar Máquina"):
-        image_data = None
-        if uploaded_file is not None:
-            file_content = uploaded_file.read()
-            image_data = base64.b64encode(file_content).decode("utf-8")
+    if limpar:
+        st.experimental_rerun()
 
-        try:
-            add_machine_to_inventory(
-                tipo=tipo,
-                marca=marca,
-                modelo=modelo,
-                numero_serie=numero_serie,
-                status=status,
-                localizacao=localizacao,
-                propria_locada=propria_locada,
-                patrimonio=patrimonio,
-                setor=setor,
-            )
-        except Exception as e:
-            st.error("Erro ao cadastrar máquina.")
-            st.write(e)
+    payload = {
+        "numero_patrimonio": patrimonio.strip(),
+        "tipo": tipo,
+        "marca": (marca or "").strip() or None,
+        "modelo": (modelo or "").strip() or None,
+        "numero_serie": (numero_serie or "").strip() or None,
+        "status": status,
+        "localizacao": localizacao,
+        "propria_locada": propria_locada,
+        "setor": setor,
+        "data_aquisicao": str(data_aquisicao) if data_aquisicao else None,
+        "data_garantia_fim": str(data_garantia_fim) if data_garantia_fim else None,
+    }
 
+    if salvar:
+        if not payload["numero_patrimonio"]:
+            st.error("Informe o Número de Patrimônio.")
+        else:
+            add_machine_to_inventory(**{
+                "tipo": payload["tipo"],
+                "marca": payload["marca"],
+                "modelo": payload["modelo"],
+                "numero_serie": payload["numero_serie"],
+                "status": payload["status"],
+                "localizacao": payload["localizacao"],
+                "propria_locada": payload["propria_locada"],
+                "patrimonio": payload["numero_patrimonio"],
+                "setor": payload["setor"],
+                "data_aquisicao": payload["data_aquisicao"],
+                "data_garantia_fim": payload["data_garantia_fim"],
+            })
 
-###########################
-# 5. Mostrar Inventário (com filtros e edição)
-###########################
+    if atualizar:
+        if not payload["numero_patrimonio"]:
+            st.error("Informe o Número de Patrimônio para atualizar.")
+        else:
+            edit_inventory_item(payload["numero_patrimonio"], payload)
 
+# =====================================================
+# 4) Lista com filtros + exportações + PDF
+# =====================================================
 def show_inventory_list():
-    st.subheader("Inventário - Lista com Filtros")
+    st.subheader("Inventário — Lista e Filtros")
 
     # Filtros
-    filtro_texto = st.text_input("Buscar por texto (marca, modelo, patrimônio...)")
-    status_options = ["Todos", "Ativo", "Em Manutencao", "Inativo"]
-    status_filtro = st.selectbox("Filtrar por Status", status_options)
+    filtro_texto = st.text_input("Busca (patrimônio, marca, modelo, UBS, setor...)")
+    colf1, colf2, colf3 = st.columns(3)
+    with colf1:
+        status_filtro = st.selectbox("Status", ["Todos", "Ativo", "Em Manutencao", "Inativo"])
+    with colf2:
+        localizacao_filtro = st.selectbox("UBS", ["Todas"] + sorted(get_ubs_list()))
+    with colf3:
+        setor_filtro = st.selectbox("Setor", ["Todos"] + sorted(get_setores_list()))
 
-    ubs_list = get_ubs_list()
-    ubs_list_filtro = ["Todas"] + sorted(ubs_list)
-    localizacao_filtro = st.selectbox("Filtrar por Localização (UBS)", ubs_list_filtro)
-
-    setores_list = get_setores_list()
-    setores_list_filtro = ["Todos"] + sorted(setores_list)
-    setor_filtro = st.selectbox("Filtrar por Setor", setores_list_filtro)
-
+    # Carrega
     machines = get_machines_from_inventory()
     if not machines:
         st.info("Nenhum item encontrado no inventário.")
         return
 
-    df = pd.DataFrame(machines)
+    df = pd.DataFrame(machines).copy()
 
-    # Aplica filtros
+    # Busca global
     if filtro_texto:
-        filtro_lower = filtro_texto.lower()
-        df = df[df.apply(lambda row: filtro_lower in str(row).lower(), axis=1)]
+        q = filtro_texto.lower()
+        df = df[df.apply(lambda r: q in str(r).lower(), axis=1)]
 
+    # Filtros específicos
     if status_filtro != "Todos":
         df = df[df["status"] == status_filtro]
-
     if localizacao_filtro != "Todas":
         df = df[df["localizacao"] == localizacao_filtro]
-
     if setor_filtro != "Todos":
         df = df[df["setor"] == setor_filtro]
 
-    st.markdown("### Resultado do Inventário (Filtrado)")
+    # Formatação datas
+    if "data_aquisicao" in df:
+        df["data_aquisicao"] = pd.to_datetime(df["data_aquisicao"], errors="coerce").dt.date.astype("string")
+    if "data_garantia_fim" in df:
+        df["data_garantia_fim"] = pd.to_datetime(df["data_garantia_fim"], errors="coerce").dt.date.astype("string")
 
-    if not df.empty:
-        gb = GridOptionsBuilder.from_dataframe(df)
-        gb.configure_default_column(filter=True, sortable=True)
-        gb.configure_pagination(paginationAutoPageSize=False)
-        gb.configure_grid_options(domLayout='normal')
-        grid_options = gb.build()
+    st.markdown("### Resultado (filtrado)")
 
-        AgGrid(
-            df,
-            gridOptions=grid_options,
-            height=400,
-            
+    if df.empty:
+        st.warning("Nenhum resultado com esses filtros.")
+        return
+
+    # KPIs leves
+    total = len(df)
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Itens", total)
+    if "status" in df.columns:
+        k2.metric("Ativos", int((df["status"] == "Ativo").sum()))
+        k3.metric("Em Manutenção", int((df["status"] == "Em Manutencao").sum()))
+    else:
+        k2.metric("Ativos", "-")
+        k3.metric("Em Manutenção", "-")
+
+    # Ordem de colunas
+    prefer = [c for c in [
+        "numero_patrimonio","tipo","marca","modelo","status","localizacao","setor",
+        "propria_locada","data_aquisicao","data_garantia_fim"
+    ] if c in df.columns]
+    others = [c for c in df.columns if c not in prefer]
+    dfv = df[prefer + others].copy()
+
+    # Tabela com destaque por status
+    gb = GridOptionsBuilder.from_dataframe(dfv)
+    gb.configure_default_column(filter=True, sortable=True, resizable=True, wrapText=True, autoHeight=True, minColumnWidth=140, flex=1)
+    gb.configure_column("numero_patrimonio", pinned="left", minColumnWidth=170)
+    gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=20)
+
+    row_style = JsCode("""
+        function(params) {
+            const s = (params.data && params.data.status) ? (''+params.data.status).toLowerCase() : '';
+            if (s === 'em manutencao') return { 'background': '#fff3cd' }; // amarelo
+            if (s === 'inativo') return { 'background': '#f8d7da' };      // vermelho
+            return null;
+        }
+    """)
+    gb.configure_grid_options(getRowStyle=row_style)
+    grid_options = gb.build()
+    grid_options["domLayout"] = "normal"
+
+    AgGrid(
+        dfv,
+        gridOptions=grid_options,
+        height=460,
+        theme="streamlit",
+        enable_enterprise_modules=False,
+        allow_unsafe_jscode=True
+    )
+
+    # Exportações
+    st.markdown("### Exportar")
+    csv_bytes = dfv.to_csv(index=False).encode("utf-8")
+    st.download_button("Baixar CSV", data=csv_bytes, file_name="inventario_filtrado.csv", mime="text/csv")
+
+    # Excel (fallback engine)
+    import importlib
+    engine = None
+    for cand in ("openpyxl", "xlsxwriter"):
+        if importlib.util.find_spec(cand):
+            engine = "openpyxl" if cand == "openpyxl" else "xlsxwriter"
+            break
+    if engine:
+        with io.BytesIO() as buffer:
+            with pd.ExcelWriter(buffer, engine=engine) as writer:
+                dfv.to_excel(writer, index=False, sheet_name="Inventario")
+            st.download_button(
+                "Baixar Excel",
+                data=buffer.getvalue(),
+                file_name="inventario_filtrado.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    else:
+        st.caption("Instale openpyxl ou xlsxwriter para exportar Excel.")
+
+    # PDF
+    if st.button("Gerar PDF do Inventário"):
+        pdf_bytes = gerar_relatorio_inventario_pdf(dfv)
+        st.download_button(
+            label="Baixar Relatório de Inventário",
+            data=pdf_bytes,
+            file_name="inventario.pdf",
+            mime="application/pdf"
         )
 
-        # Geração do PDF do inventário filtrado
-        if st.button("Gerar PDF do Inventário"):
-            pdf_bytes = gerar_relatorio_inventario_pdf(df)
-            st.download_button(
-                label="Baixar Relatório de Inventário",
-                data=pdf_bytes,
-                file_name="inventario.pdf",
-                mime="application/pdf"
-            )
-
-    else:
-        st.warning("Nenhum resultado com esses filtros.")
-
+    # Edição / Exclusão
     st.markdown("---")
-    st.subheader("Detalhes / Edição de Item do Inventário")
+    st.subheader("Detalhes / Edição de Item")
 
-    if not df.empty:
-        patrimonio_options = df["numero_patrimonio"].unique().tolist()
-    else:
-        patrimonio_options = []
-
-    if patrimonio_options:
-        selected_patrimonio = st.selectbox("Selecione o patrimônio para visualizar detalhes", patrimonio_options)
-    else:
-        selected_patrimonio = None
-
-    if selected_patrimonio:
-        item = df[df["numero_patrimonio"] == selected_patrimonio].fillna("").iloc[0]
-
-        st.markdown("### Foto Atual da Máquina")
-        if item.get("image_data") not in [None, "", "null"]:
-            current_image = base64.b64decode(item["image_data"])
-            st.image(current_image, caption=f"Foto da máquina {selected_patrimonio}")
-        else:
-            st.info("Nenhuma foto cadastrada para esta máquina.")
+    patrimonio_options = dfv["numero_patrimonio"].dropna().unique().tolist()
+    selected_patrimonio = st.selectbox("Selecione o patrimônio", ["—"] + patrimonio_options)
+    if selected_patrimonio and selected_patrimonio != "—":
+        item = dfv[dfv["numero_patrimonio"] == selected_patrimonio].fillna("").iloc[0]
 
         with st.expander("Editar Máquina"):
             with st.form("editar_maquina"):
                 tipo_options = ["Computador", "Impressora", "Monitor", "Nobreak", "Outro"]
-                if item.get("tipo") in tipo_options:
-                    tipo_index = tipo_options.index(item.get("tipo"))
-                else:
-                    tipo_index = 0
-                tipo = st.selectbox("Tipo de Equipamento", tipo_options, index=tipo_index)
+                tipo_index = tipo_options.index(item["tipo"]) if item.get("tipo") in tipo_options else 0
+                tipo = st.selectbox("Tipo", tipo_options, index=tipo_index)
 
                 marca = st.text_input("Marca", value=item.get("marca", ""))
                 modelo = st.text_input("Modelo", value=item.get("modelo", ""))
                 numero_serie = st.text_input("Número de Série", value=item.get("numero_serie", ""))
 
                 status_opts = ["Ativo", "Em Manutencao", "Inativo"]
-                if item["status"] in status_opts:
-                    status_index = status_opts.index(item["status"])
-                else:
-                    status_index = 0
+                status_index = status_opts.index(item["status"]) if item.get("status") in status_opts else 0
                 status = st.selectbox("Status", status_opts, index=status_index)
 
-                ubs_list_sorted = sorted(ubs_list)
-                if item["localizacao"] in ubs_list_sorted:
-                    loc_index = ubs_list_sorted.index(item["localizacao"])
-                else:
-                    loc_index = 0
-                localizacao = st.selectbox("Localização (UBS)", ubs_list_sorted, index=loc_index)
+                ubs_list_sorted = sorted(get_ubs_list())
+                loc_index = ubs_list_sorted.index(item["localizacao"]) if item.get("localizacao") in ubs_list_sorted else 0
+                localizacao = st.selectbox("UBS", ubs_list_sorted, index=loc_index)
 
-                setores_list_sorted = sorted(setores_list)
-                if item["setor"] in setores_list_sorted:
-                    setor_index = setores_list_sorted.index(item["setor"])
-                else:
-                    setor_index = 0
+                setores_list_sorted = sorted(get_setores_list())
+                setor_index = setores_list_sorted.index(item["setor"]) if item.get("setor") in setores_list_sorted else 0
                 setor = st.selectbox("Setor", setores_list_sorted, index=setor_index)
 
                 propria_options = ["Propria", "Locada"]
-                if item["propria_locada"] in propria_options:
-                    propria_index = propria_options.index(item["propria_locada"])
-                else:
-                    propria_index = 0
-                propria_locada = st.selectbox("Própria ou Locada", propria_options, index=propria_index)
-
-                uploaded_file = st.file_uploader("Nova foto (opcional)", type=["png","jpg","jpeg"])
-                remove_foto = st.checkbox("Remover foto atual?", value=False)
+                propria_index = propria_options.index(item["propria_locada"]) if item.get("propria_locada") in propria_options else 0
+                propria_locada = st.selectbox("Propriedade", propria_options, index=propria_index)
 
                 submit = st.form_submit_button("Salvar Alterações")
                 if submit:
                     new_values = {
                         "tipo": tipo,
-                        "marca": marca,
-                        "modelo": modelo,
+                        "marca": marca or None,
+                        "modelo": modelo or None,
                         "numero_serie": numero_serie or None,
                         "status": status,
                         "localizacao": localizacao,
                         "setor": setor,
-                        "propria_locada": propria_locada
+                        "propria_locada": propria_locada,
                     }
-
-                    if remove_foto:
-                        new_values["image_data"] = None
-                    else:
-                        if uploaded_file is not None:
-                            file_content = uploaded_file.read()
-                            encoded = base64.b64encode(file_content).decode("utf-8")
-                            new_values["image_data"] = encoded
-
                     edit_inventory_item(selected_patrimonio, new_values)
 
-        with st.expander("Excluir Máquina do Inventário"):
-            if st.button("Excluir esta máquina"):
+        with st.expander("Excluir Máquina"):
+            if st.button("Excluir este item"):
                 delete_inventory_item(selected_patrimonio)
 
-        with st.expander("Histórico Completo da Máquina"):
+        with st.expander("Histórico da Máquina"):
             st.markdown("**Chamados Técnicos:**")
             try:
                 mod = __import__("chamados", fromlist=["get_chamados_por_patrimonio"])
@@ -344,35 +401,26 @@ def show_inventory_list():
             if chamados_:
                 st.dataframe(pd.DataFrame(chamados_))
             else:
-                st.write("Nenhum chamado técnico encontrado para este item.")
+                st.write("Nenhum chamado técnico para este item.")
 
             st.markdown("**Peças Utilizadas:**")
             pecas = get_pecas_usadas_por_patrimonio(selected_patrimonio)
             if pecas:
                 st.dataframe(pd.DataFrame(pecas))
             else:
-                st.write("Nenhuma peça utilizada encontrada para este item.")
+                st.write("Nenhuma peça registrada para este item.")
 
             st.markdown("**Histórico de Manutenção:**")
             historico_manut = get_historico_manutencao_por_patrimonio(selected_patrimonio)
             if historico_manut:
                 st.dataframe(pd.DataFrame(historico_manut))
             else:
-                st.write("Nenhum registro de manutenção encontrado para este item.")
+                st.write("Sem registros de manutenção.")
 
-###########################
-# 6. Dashboard do Inventário
-###########################
-
+# =====================================================
+# 5) Dashboard do Inventário (sem imagens)
+# =====================================================
 def dashboard_inventario():
-    """
-    Exemplo de painel do inventário que inclui:
-      - Distribuição por Status
-      - Distribuição por Tipo
-      - Distribuição por UBS
-      - Distribuição por Setor
-      - Máquinas com Mais Chamados
-    """
     st.subheader("Dashboard do Inventário")
 
     data = get_machines_from_inventory()
@@ -381,198 +429,113 @@ def dashboard_inventario():
         return
     df = pd.DataFrame(data)
 
-    from chamados import list_chamados
-    chamados = list_chamados() or []
-    df_chamados = pd.DataFrame(chamados)
-
-    # 1) Distribuição por Status
+    # KPIs
+    total = len(df)
+    k1,k2,k3 = st.columns(3)
+    k1.metric("Total de Itens", total)
     if "status" in df.columns:
-        status_count = df["status"].value_counts().reset_index()
-        status_count.columns = ["status", "quantidade"]
-
-        st.markdown("### 1) Distribuição por Status")
-        st.table(status_count)
-
-        fig, ax = plt.subplots()
-        ax.bar(status_count["status"], status_count["quantidade"], color="green")
-        ax.set_xlabel("Status")
-        ax.set_ylabel("Quantidade")
-        ax.set_title("Distribuição de Status no Inventário")
-        st.pyplot(fig)
+        k2.metric("Ativos", int((df["status"] == "Ativo").sum()))
+        k3.metric("Em Manutenção", int((df["status"] == "Em Manutencao").sum()))
     else:
-        st.warning("Coluna 'status' não encontrada no inventário.")
+        k2.metric("Ativos", "-")
+        k3.metric("Em Manutenção", "-")
 
-    # 2) Distribuição por Tipo
-    if "tipo" in df.columns:
-        st.markdown("### 2) Distribuição por Tipo de Equipamento")
-        type_count = df["tipo"].value_counts().reset_index()
-        type_count.columns = ["tipo", "quantidade"]
-        st.table(type_count)
-
-        fig2, ax2 = plt.subplots()
-        ax2.bar(type_count["tipo"], type_count["quantidade"], color="blue")
-        ax2.set_xlabel("Tipo de Equipamento")
-        ax2.set_ylabel("Quantidade")
-        ax2.set_title("Distribuição por Tipo de Equipamento")
-        plt.xticks(rotation=45)
-        st.pyplot(fig2)
-    else:
-        st.warning("Coluna 'tipo' não encontrada no inventário.")
-
-    # 3) Distribuição por UBS
-    if "localizacao" in df.columns and "tipo" in df.columns:
-        st.markdown("### 3) Distribuição por UBS ")
-        df_ubs = df[df["tipo"].isin(["Computador", "Impressora"])]
-        if df_ubs.empty:
-            st.write("Nenhum Computador ou Impressora encontrado.")
-        else:
-            group_ubs = df_ubs.groupby(["localizacao", "tipo"]).size().reset_index(name="quantidade")
-            pivot_ubs = group_ubs.pivot(index="localizacao", columns="tipo", values="quantidade").fillna(0)
-            pivot_ubs = pivot_ubs.astype(int)
-            st.markdown("#### Tabela por UBS e Tipo ")
-            st.table(pivot_ubs)
-
-            fig3, ax3 = plt.subplots()
-            pivot_ubs.plot(kind="bar", ax=ax3, stacked=False)
-            ax3.set_xlabel("UBS (Localização)")
-            ax3.set_ylabel("Quantidade")
-            ax3.set_title("Computadores e Impressoras por UBS")
-            plt.xticks(rotation=45, ha="right")
-            st.pyplot(fig3)
-    else:
-        st.warning("Coluna 'localizacao' ou 'tipo' não encontrada no inventário.")
-
-    # 4) Distribuição por Setor
+    # Gráficos simples
+    if "localizacao" in df.columns:
+        by_ubs = df.groupby("localizacao").size().reset_index(name="qtd").sort_values("qtd", ascending=False).head(15)
+        st.plotly_chart(
+            __import__("plotly.express").express.bar(by_ubs, x="localizacao", y="qtd", title="Itens por UBS"),
+            use_container_width=True
+        )
     if "setor" in df.columns:
-        st.markdown("### 4) Distribuição por Setor")
-        setor_count = df["setor"].value_counts().reset_index()
-        setor_count.columns = ["setor", "quantidade"]
-        st.table(setor_count)
+        by_setor = df.groupby("setor").size().reset_index(name="qtd").sort_values("qtd", ascending=False).head(15)
+        st.plotly_chart(
+            __import__("plotly.express").express.bar(by_setor, x="setor", y="qtd", title="Itens por Setor"),
+            use_container_width=True
+        )
+    if "tipo" in df.columns:
+        by_tipo = df.groupby("tipo").size().reset_index(name="qtd").sort_values("qtd", ascending=False)
+        st.plotly_chart(
+            __import__("plotly.express").express.pie(by_tipo, names="tipo", values="qtd", title="Distribuição por Tipo"),
+            use_container_width=True
+        )
 
-        fig4, ax4 = plt.subplots()
-        ax4.barh(setor_count["setor"], setor_count["quantidade"], color="purple")
-        ax4.set_xlabel("Quantidade")
-        ax4.set_ylabel("Setor")
-        ax4.set_title("Distribuição por Setor")
-        st.pyplot(fig4)
-    else:
-        st.warning("Coluna 'setor' não encontrada no inventário.")
-
-    # 5) Máquinas com Mais Chamados (Top 10)
-    st.markdown("### 5) Máquinas com Mais Chamados (Top 10)")
-    if df_chamados.empty:
-        st.info("Não há chamados registrados para cruzar com o inventário.")
-    else:
-        maquinas_mais_chamados = df_chamados.groupby("patrimonio").size().reset_index(name="qtd_chamados")
-        df_merged = pd.merge(df, maquinas_mais_chamados, how="left",
-                             left_on="numero_patrimonio", right_on="patrimonio")
-        df_merged["qtd_chamados"] = df_merged["qtd_chamados"].fillna(0)
-        df_merged.sort_values("qtd_chamados", ascending=False, inplace=True)
-        top_10 = df_merged.head(10)
-
-        st.dataframe(top_10[["numero_patrimonio", "tipo", "marca", "modelo", "qtd_chamados"]])
-
-        fig5, ax5 = plt.subplots()
-        ax5.barh(top_10["numero_patrimonio"].astype(str), top_10["qtd_chamados"], color="red")
-        ax5.set_xlabel("Quantidade de Chamados")
-        ax5.set_ylabel("Patrimônio")
-        ax5.set_title("Top 10 Máquinas com Mais Chamados")
-        ax5.invert_yaxis()
-        st.pyplot(fig5)
-
-
-###########################
-# 7. Geração de Relatório em PDF (com logo + gráficos)
-###########################
-
+# =====================================================
+# 6) PDF
+# =====================================================
 class PDF(FPDF):
     def __init__(self, orientation="L", unit="mm", format="A4", logo_path="infocustec.png"):
         super().__init__(orientation, unit, format)
         self.logo_path = logo_path
 
     def header(self):
-        # Tenta inserir logotipo no canto esquerdo, se existir
         if os.path.exists(self.logo_path):
             self.image(self.logo_path, x=10, y=8, w=30)
             self.set_xy(45, 10)
         else:
             self.set_xy(10, 10)
-
         self.set_font("Arial", "B", 14)
         self.cell(0, 10, "Relatório de Inventário", ln=True, align="L")
-        self.ln(5)
+        self.set_font("Arial", "", 10)
+        agora = datetime.now(FORTALEZA_TZ).strftime("%d/%m/%Y %H:%M")
+        self.cell(0, 8, f"Gerado em: {agora}", ln=True)
+        self.ln(2)
 
     def footer(self):
         self.set_y(-15)
         self.set_font("Arial", "I", 10)
         self.cell(0, 10, f"Página {self.page_no()}", 0, 0, "C")
 
-
-def gerar_relatorio_inventario_pdf(df_inventario):
+def gerar_relatorio_inventario_pdf(df_inventario: pd.DataFrame) -> bytes:
     """
-    Gera um PDF com:
-      - Logotipo no header (se existir 'logo.png')
-      - Tabela do inventário (colunas mais largas para caber melhor)
-      - Exemplo de salvamento de um gráfico
+    Gera PDF com:
+      - Cabeçalho (logo opcional + data)
+      - Resumo (contagens por status)
+      - Tabela com colunas chave
     """
-
-    # Modo Paisagem (L) para dar mais espaço e evitar sobreposição
     pdf = PDF(orientation="L", format="A4", logo_path="infocustec.png")
     pdf.add_page()
     pdf.set_font("Arial", "", 10)
 
-    # Ajusta as colunas
-    columns = ["numero_patrimonio", "tipo", "marca", "modelo", "status", "localizacao", "setor"]
-    headers = ["Patrimônio", "Tipo", "Marca", "Modelo", "Status", "Localização", "Setor"]
-    col_widths = [40, 40, 40, 40, 40, 40, 40]  # Ajuste conforme necessidade
+    # Resumo
+    total = len(df_inventario)
+    ativos = int((df_inventario["status"] == "Ativo").sum()) if "status" in df_inventario.columns else 0
+    manut = int((df_inventario["status"] == "Em Manutencao").sum()) if "status" in df_inventario.columns else 0
+    inat = int((df_inventario["status"] == "Inativo").sum()) if "status" in df_inventario.columns else 0
 
-    # Cabeçalho da tabela
-    for i, header_text in enumerate(headers):
-        pdf.cell(col_widths[i], 8, header_text, border=1, ln=0, align="C")
+    pdf.set_font("Arial", "", 11)
+    pdf.cell(0, 8, f"Total de itens: {total} | Ativos: {ativos} | Em Manutenção: {manut} | Inativos: {inat}", ln=True)
+    pdf.ln(3)
+
+    # Tabela
+    cols = [c for c in ["numero_patrimonio","tipo","marca","modelo","status","localizacao","setor","data_aquisicao","data_garantia_fim"] if c in df_inventario.columns]
+    headers = {
+        "numero_patrimonio":"Patrimônio","tipo":"Tipo","marca":"Marca","modelo":"Modelo",
+        "status":"Status","localizacao":"Localização","setor":"Setor","data_aquisicao":"Aquisição","data_garantia_fim":"Garantia"
+    }
+    # larguras equilibradas (A4 landscape ~ 277mm úteis)
+    base_widths = [36, 28, 28, 36, 28, 36, 32, 26, 27]
+    widths = base_widths[:len(cols)]
+
+    pdf.set_font("Arial", "B", 9)
+    for i, c in enumerate(cols):
+        pdf.cell(widths[i], 8, headers.get(c, c)[:18], border=1, align="C")
     pdf.ln(8)
 
-    # Linhas
+    pdf.set_font("Arial", "", 8)
     for _, row in df_inventario.iterrows():
-        pdf.cell(col_widths[0], 8, str(row["numero_patrimonio"]), border=1, ln=0)
-        pdf.cell(col_widths[1], 8, str(row["tipo"]), border=1, ln=0)
-        pdf.cell(col_widths[2], 8, str(row["marca"]), border=1, ln=0)
-        pdf.cell(col_widths[3], 8, str(row["modelo"]), border=1, ln=0)
-        pdf.cell(col_widths[4], 8, str(row["status"]), border=1, ln=0)
-        pdf.cell(col_widths[5], 8, str(row["localizacao"]), border=1, ln=0)
-        pdf.cell(col_widths[6], 8, str(row["setor"]), border=1, ln=0)
-        pdf.ln(8)
+        for i, c in enumerate(cols):
+            val = "" if pd.isna(row.get(c)) else str(row.get(c))
+            pdf.cell(widths[i], 6, val[:25], border=1)
+        pdf.ln(6)
 
-    # (Opcional) Exemplo: inserir gráfico de distribuição do status
-    # 1) Cria um plot no matplotlib
-    try:
-        status_count = df_inventario["status"].value_counts().reset_index()
-        fig, ax = plt.subplots(figsize=(4, 3))
-        ax.bar(status_count["index"], status_count["status"])
-        ax.set_title("Distribuição de Status")
-        # 2) Salva em arquivo temporário
-        temp_chart = "chart_temp.png"
-        plt.savefig(temp_chart, dpi=100)
-        plt.close(fig)
-        # 3) Insere no PDF
-        pdf.add_page()  # nova página para o gráfico
-        pdf.set_xy(10, 20)
-        pdf.image(temp_chart, x=10, y=20, w=120)
-        # 4) Remove o arquivo temporário
-        if os.path.exists(temp_chart):
-            os.remove(temp_chart)
-    except Exception as e:
-        print("Erro ao gerar gráfico de status:", e)
+    out = pdf.output(dest="S")
+    # normaliza para bytes
+    if hasattr(out, "getvalue"):
+        out = out.getvalue()
+    if isinstance(out, str):
+        out = out.encode("latin-1", errors="ignore")
+    elif isinstance(out, bytearray):
+        out = bytes(out)
+    return out
 
-    # pdf.output(dest="S") pode retornar str, bytes ou bytearray
-    pdf_stream = pdf.output(dest="S")
-
-    if hasattr(pdf_stream, "getvalue"):
-        pdf_stream = pdf_stream.getvalue()
-    if isinstance(pdf_stream, str):
-        pdf_stream = pdf_stream.encode("latin-1")
-    if isinstance(pdf_stream, bytearray):
-        pdf_stream = bytes(pdf_stream)
-    if not isinstance(pdf_stream, (bytes, bytearray)):
-        pdf_stream = bytes(pdf_stream)
-
-    return pdf_stream
