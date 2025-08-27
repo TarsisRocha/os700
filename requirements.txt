@@ -11,4 +11,6 @@ pytz>=2021.1
 twilio
 plotly
 streamlit-card
+XlsxWriter>=3.2.0
+
 
