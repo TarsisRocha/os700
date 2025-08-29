@@ -1,14 +1,3 @@
-# ai_nlq_ai.py
-"""
-NLQ para 'chamados' com fallback sem IA.
-- Sem OPENAI_API_KEY: funciona com intents padrão (listar, contar, > horas, etc.)
-- Com OPENAI_API_KEY: entende perguntas livres e gera 'free_summary'.
-
-Funções expostas:
-  - answer_question(chamados:list, question:str) -> dict
-  - ia_available() -> bool
-"""
-
 from __future__ import annotations
 import os, json
 from typing import Any, Dict, Optional
