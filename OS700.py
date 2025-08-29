@@ -1,4 +1,15 @@
-# OS800.py — App completo (menu moderno + filtros + relatórios + NLQ IA)
+Segue o OS800.py completo, já com:
+	•	Botão/aba “Pergunte com IA” usando answer_question + ia_available (fallback sem chave).
+	•	Badge de status da IA.
+	•	Atalho “Resumo IA dos dados atuais”.
+	•	Finalização por PROTOCOLO.
+	•	Priorização e filtro >48h úteis.
+	•	Relatórios 2.0 com export CSV/Excel.
+	•	Layout de login sem barra azul.
+
+Cole inteiro como OS800.py.
+
+# OS800.py — App completo (menu moderno + filtros + relatórios + NLQ IA com fallback)
 import os
 import logging
 import base64
@@ -76,8 +87,8 @@ from ubs import get_ubs_list
 from setores import get_setores_list
 from estoque import manage_estoque, get_estoque
 
-# IA NLQ (perguntas livres)
-from ai_nlq_ai import answer_question
+# IA NLQ (perguntas livres com fallback)
+from ai_nlq_ai import answer_question, ia_available
 
 # =========================
 # Estado de sessão
@@ -205,22 +216,34 @@ def login_page():
         st.markdown('</div>', unsafe_allow_html=True)
 
 # =========================
-# Página: Pergunte com IA (NLQ)
+# Página: Pergunte com IA (NLQ) + helper
 # =========================
+def _rodar_pergunta(q: str):
+    chamados = list_chamados()
+    if not chamados:
+        st.info("Sem dados de chamados.")
+        return
+    result = answer_question(chamados, q)
+    st.markdown(result.get("markdown",""))
+    tbl = result.get("table")
+    if isinstance(tbl, pd.DataFrame) and not tbl.empty:
+        st.dataframe(tbl, use_container_width=True)
+
 def pergunte_com_ia_page():
     st.subheader("Pergunte com IA")
-    st.caption("Exemplos: 'qual chamado em aberto mais antigo?', 'quantos abertos acima de 72h', 'abertos por ubs', 'buscar toner na cruzeiro', 'resuma os chamados'.")
+    # badge status IA
+    st.caption(("🟢 IA disponível" if ia_available() else "⚪ IA não configurada — funções padrão ativas"))
+    st.caption("Exemplos: 'qual chamado em aberto mais antigo?', 'quantos abertos acima de 72h', "
+               "'abertos por ubs', 'buscar toner na cruzeiro', 'resuma os chamados'.")
 
     pergunta = st.text_input("Sua pergunta")
-    if st.button("Responder", type="primary"):
-        chamados = list_chamados()
-        if not chamados:
-            st.info("Sem dados de chamados.")
-            return
-        result = answer_question(chamados, pergunta)
-        st.markdown(result.get("markdown",""))
-        if isinstance(result.get("table"), pd.DataFrame):
-            st.dataframe(result["table"], use_container_width=True)
+    cols = st.columns([1,1])
+    with cols[0]:
+        if st.button("Responder", type="primary"):
+            _rodar_pergunta(pergunta)
+    with cols[1]:
+        if st.button("Resumo IA dos dados atuais"):
+            _rodar_pergunta("resuma os chamados")
 
 # =========================
 # Página: Dashboard
