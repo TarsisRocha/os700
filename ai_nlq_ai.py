@@ -1,29 +1,39 @@
-import os
-import json
-from datetime import datetime
+# ai_nlq_ai.py
+"""
+NLQ para 'chamados' com fallback sem IA.
+- Sem OPENAI_API_KEY: funciona com intents padrão (listar, contar, > horas, etc.)
+- Com OPENAI_API_KEY: entende perguntas livres e gera 'free_summary'.
+
+Funções expostas:
+  - answer_question(chamados:list, question:str) -> dict
+  - ia_available() -> bool
+"""
+
+from __future__ import annotations
+import os, json
 from typing import Any, Dict, Optional
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 import pytz
 
-# OpenAI opcional: o módulo funciona mesmo sem a chave (apenas intents "free_summary" e o parsing IA ficam limitados)
+# OpenAI é OPCIONAL — o módulo segue funcionando sem ela
 try:
     from openai import OpenAI
-except Exception:  # pragma: no cover
+except Exception:
     OpenAI = None  # type: ignore
 
 FORTALEZA_TZ = pytz.timezone("America/Fortaleza")
+MODEL = "gpt-4o-mini"
 
-# =========================
-# OpenAI - inicialização segura
-# =========================
+# ---------------- OpenAI helpers ----------------
 def _get_openai_api_key() -> Optional[str]:
-    # 1) env var
+    # 1) env var padrão
     key = os.getenv("OPENAI_API_KEY")
     if key:
         return key
-    # 2) streamlit secrets (opcional)
+    # 2) Streamlit secrets (toml): [openai].api_key
     try:
         import streamlit as st  # type: ignore
         if "openai" in st.secrets and "api_key" in st.secrets["openai"]:
@@ -33,8 +43,10 @@ def _get_openai_api_key() -> Optional[str]:
     return None
 
 def _make_openai_client() -> Optional["OpenAI"]:
+    if OpenAI is None:
+        return None
     api_key = _get_openai_api_key()
-    if not api_key or OpenAI is None:
+    if not api_key:
         return None
     try:
         return OpenAI(api_key=api_key)
@@ -42,40 +54,29 @@ def _make_openai_client() -> Optional["OpenAI"]:
         return None
 
 _CLIENT = _make_openai_client()
-MODEL = "gpt-4o-mini"  # rápido/viável para parsing e resumos; ajuste se preferir
-
 def _has_openai() -> bool:
     return _CLIENT is not None
 
 
-# =========================
-# Parsing IA da pergunta -> JSON controlado
-# =========================
+# --------------- Parser via IA (JSON controlado) ---------------
+# Importante: o parser retorna APENAS JSON no schema abaixo.
 _PARSER_SYSTEM = (
-    "Você é um parser que converte perguntas em português sobre 'chamados' de TI "
-    "em um JSON com o seguinte schema. NUNCA crie campos fora disso e NÃO gere SQL.\n\n"
-    "Schema JSON:\n"
-    "{\n"
-    '  "intent": "list_open | oldest_open | count_open | open_by_ubs | open_over_hours | '
-    'top_defects | avg_resolution | open_in_ubs | search_text | free_summary",\n'
-    '  "filters": {"ubs": "<string|opcional>", "setor": "<string|opcional>", "contains": "<string|opcional>"},\n'
-    '  "hours": <int|opcional para open_over_hours>\n'
-    "}\n\n"
-    "- Se a pergunta pedir apenas um resumo narrativo, use intent=free_summary.\n"
-    "- Se falar 'acima de 72h', 'acima de 24h', etc., use open_over_hours com 'hours' correspondente.\n"
-    "- Se pedir 'buscar', 'procurar', 'contém', use search_text com filters.contains.\n"
-    "- Se mencionar uma UBS específica, preencha filters.ubs com o texto capturado (sem normalizar demais).\n"
-    "- Se mencionar setor, preencha filters.setor.\n"
-    "- Retorne APENAS JSON puro, sem comentários nem texto extra."
+    "Você converte perguntas em português sobre chamados de TI em JSON com o schema:\n"
+    '{ "intent":"list_open|oldest_open|count_open|open_by_ubs|open_over_hours|'
+    'top_defects|avg_resolution|open_in_ubs|search_text|free_summary",'
+    '  "filters":{"ubs":"","setor":"","contains":""}, "hours":48 }\n'
+    "- 'open_over_hours' deve trazer 'hours' (int) quando solicitado, ex: 24, 48, 72.\n"
+    "- 'search_text' usa filters.contains.\n"
+    "- Se mencionar UBS/setor, preencher filters.ubs/filters.setor com o texto citado.\n"
+    "NÃO gere SQL. Retorne SOMENTE JSON puro, sem comentários."
 )
 
 def _parse_question_llm(question: str) -> Dict[str, Any]:
     """
-    Tenta usar LLM para mapear pergunta -> JSON controlado.
-    Fallback: retorna list_open sem filtros.
+    Usa o LLM para interpretar a pergunta e retornar um JSON estruturado.
+    Sem IA, cai no fallback: {'intent':'list_open','filters':{}}.
     """
     if not _has_openai():
-        # Sem OpenAI: fallback seguro
         return {"intent": "list_open", "filters": {}}
 
     try:
@@ -83,17 +84,16 @@ def _parse_question_llm(question: str) -> Dict[str, Any]:
             model=MODEL,
             messages=[
                 {"role": "system", "content": _PARSER_SYSTEM},
-                {"role": "user", "content": f"Pergunta: {question}\nRetorne somente JSON."}
+                {"role": "user", "content": f"Pergunta: {question}\nRetorne apenas JSON."}
             ],
             temperature=0.1,
         )
-        content = r.choices[0].message.content.strip()
+        content = (r.choices[0].message.content or "").strip()
         data = json.loads(content)
+        if not isinstance(data, dict):
+            raise ValueError("Parser não retornou JSON objeto.")
 
         # sane defaults
-        if not isinstance(data, dict):
-            raise ValueError("Resposta do parser não é JSON objeto.")
-
         data.setdefault("intent", "list_open")
         data.setdefault("filters", {})
         if not isinstance(data["filters"], dict):
@@ -107,13 +107,10 @@ def _parse_question_llm(question: str) -> Dict[str, Any]:
 
         return data
     except Exception:
-        # Fallback total
         return {"intent": "list_open", "filters": {}}
 
 
-# =========================
-# Helpers de negócio
-# =========================
+# ----------------- Data helpers -----------------
 def _prepare_df(chamados: list) -> pd.DataFrame:
     df = pd.DataFrame(chamados).copy()
     if df.empty:
@@ -140,10 +137,11 @@ def _apply_filters(df: pd.DataFrame, filters: Dict[str, Any]) -> pd.DataFrame:
 
 def _calc_horas_uteis(abertura_str: str, fim_dt: datetime) -> float:
     """
-    Usa calculate_working_hours se existir; caso contrário, aproxima por horas corridas.
+    Tenta calcular usando calculate_working_hours() do módulo 'chamados'.
+    Se não conseguir, usa horas corridas como aproximação.
     """
     try:
-        from chamados import calculate_working_hours  # import tardio para evitar dependência cíclica
+        from chamados import calculate_working_hours  # import tardio para evitar dependência circular
         ab = datetime.strptime(abertura_str, "%d/%m/%Y %H:%M:%S")
         delta = calculate_working_hours(ab, fim_dt)
         return round(delta.total_seconds() / 3600.0, 2)
@@ -155,17 +153,15 @@ def _calc_horas_uteis(abertura_str: str, fim_dt: datetime) -> float:
             return np.nan
 
 
-# =========================
-# Execução dos intents
-# =========================
+# ----------------- Executor principal -----------------
 def answer_question(chamados: list, question: str) -> Dict[str, Any]:
     """
-    Processa a pergunta 'question' contra os dados 'chamados' (lista de dicts).
+    Executa uma pergunta NLQ sobre os dados de chamados.
 
     Retorno:
       {
         "ok": True/False,
-        "markdown": "texto pronto para exibir",
+        "markdown": "texto pronto",
         "table": pd.DataFrame | None
       }
     """
@@ -186,12 +182,9 @@ def answer_question(chamados: list, question: str) -> Dict[str, Any]:
         res = df_f[df_f["em_aberto"]]
         if res.empty:
             return {"ok": True, "markdown": "Nenhum chamado em aberto para este filtro.", "table": None}
-        cols = [c for c in ["protocolo", "ubs", "setor", "tipo_defeito", "problema", "hora_abertura"] if c in res.columns]
-        return {
-            "ok": True,
-            "markdown": f"**Abertos**: {len(res)}",
-            "table": res[cols].sort_values("hora_abertura", ascending=True) if cols else res.sort_values("hora_abertura")
-        }
+        cols = [c for c in ["protocolo","ubs","setor","tipo_defeito","problema","hora_abertura"] if c in res.columns]
+        tbl = res[cols].sort_values("hora_abertura", ascending=True) if cols else res.sort_values("hora_abertura", ascending=True)
+        return {"ok": True, "markdown": f"**Abertos**: {len(res)}", "table": tbl}
 
     # ---------- oldest_open ----------
     if intent == "oldest_open":
@@ -233,13 +226,11 @@ def answer_question(chamados: list, question: str) -> Dict[str, Any]:
         df_op = df_f[df_f["em_aberto"]].copy()
         if df_op.empty:
             return {"ok": True, "markdown": "Nenhum chamado em aberto.", "table": None}
-        df_op["idade_uteis_h"] = df_op.apply(
-            lambda r: _calc_horas_uteis(r.get("hora_abertura", ""), now_local), axis=1
-        )
+        df_op["idade_uteis_h"] = df_op.apply(lambda r: _calc_horas_uteis(r.get("hora_abertura",""), now_local), axis=1)
         res = df_op[df_op["idade_uteis_h"] > hours].copy()
         if res.empty:
             return {"ok": True, "markdown": f"Nenhum aberto acima de **{hours}h úteis**.", "table": None}
-        cols = [c for c in ["protocolo", "ubs", "setor", "tipo_defeito", "problema", "hora_abertura", "idade_uteis_h"] if c in res.columns]
+        cols = [c for c in ["protocolo","ubs","setor","tipo_defeito","problema","hora_abertura","idade_uteis_h"] if c in res.columns]
         res = res[cols].sort_values("idade_uteis_h", ascending=False) if cols else res.sort_values("idade_uteis_h", ascending=False)
         return {"ok": True, "markdown": f"**Abertos acima de {hours}h úteis:** **{len(res)}**", "table": res}
 
@@ -276,7 +267,7 @@ def answer_question(chamados: list, question: str) -> Dict[str, Any]:
             v = fechados["t_resolucao_seg"].dropna()
             if v.empty:
                 return {"ok": True, "markdown": "Não foi possível calcular.", "table": None}
-            horas = round(v.mean() / 3600, 1)
+            horas = round(v.mean() / 3600.0, 1)
             return {"ok": True, "markdown": f"**Tempo médio de resolução (horas úteis):** **{horas} h**.", "table": None}
         except Exception:
             return {"ok": True, "markdown": "Cálculo de horas úteis indisponível.", "table": None}
@@ -289,7 +280,7 @@ def answer_question(chamados: list, question: str) -> Dict[str, Any]:
         res = df_f[df_f["em_aberto"] & df_f["ubs"].astype(str).str.upper().str.contains(alvo.upper(), na=False)]
         if res.empty:
             return {"ok": True, "markdown": f"Nenhum aberto na UBS '{alvo}'.", "table": None}
-        cols = [c for c in ["protocolo", "setor", "tipo_defeito", "problema", "hora_abertura"] if c in res.columns]
+        cols = [c for c in ["protocolo","setor","tipo_defeito","problema","hora_abertura"] if c in res.columns]
         return {"ok": True, "markdown": f"**Abertos na UBS '{alvo}': {len(res)}**", "table": res[cols] if cols else res}
 
     # ---------- search_text ----------
@@ -300,22 +291,22 @@ def answer_question(chamados: list, question: str) -> Dict[str, Any]:
         res = df_f[df_f["problema"].astype(str).str.upper().str.contains(text.upper(), na=False)]
         if res.empty:
             return {"ok": True, "markdown": f"Nenhum chamado contendo '{text}'.", "table": None}
-        cols = [c for c in ["protocolo", "ubs", "setor", "tipo_defeito", "problema", "hora_abertura", "hora_fechamento"] if c in res.columns]
+        cols = [c for c in ["protocolo","ubs","setor","tipo_defeito","problema","hora_abertura","hora_fechamento"] if c in res.columns]
         return {"ok": True, "markdown": f"**Encontrados:** {len(res)} contendo '{text}'", "table": res[cols].head(200) if cols else res.head(200)}
 
     # ---------- free_summary ----------
     if intent == "free_summary":
         if not _has_openai():
             return {"ok": False, "markdown": "⚠️ Resumo IA indisponível: configure OPENAI_API_KEY.", "table": None}
-        cols = [c for c in ["protocolo", "ubs", "setor", "tipo_defeito", "problema", "hora_abertura", "hora_fechamento"] if c in df_f.columns]
+        cols = [c for c in ["protocolo","ubs","setor","tipo_defeito","problema","hora_abertura","hora_fechamento"] if c in df_f.columns]
         base = df_f[cols].head(300) if cols else df_f.head(300)
         csv_chunk = base.to_csv(index=False)
         prompt = (
             "Você é um analista de suporte. Faça um resumo executivo em 6-10 bullets do CSV de chamados (máx 300 linhas):\n"
-            "- destaques de volume por UBS e por setor\n"
+            "- volume por UBS e por setor\n"
             "- principais tipos de defeito\n"
-            "- risco (abertos mais antigos)\n"
-            "- sugestões objetivas de próxima ação\n\n"
+            "- riscos (abertos antigos)\n"
+            "- próximas ações objetivas\n\n"
             f"CSV:\n{csv_chunk}"
         )
         try:
@@ -329,6 +320,9 @@ def answer_question(chamados: list, question: str) -> Dict[str, Any]:
             return {"ok": False, "markdown": "Falha ao gerar resumo IA.", "table": None}
 
     # ---------- fallback ----------
-    return {"ok": False, "markdown": "Não entendi. Tente reformular ou pergunte algo como: 'abertos por ubs', 'acima de 48h', 'tipos de defeito mais comuns'.", "table": None}
+    return {"ok": False, "markdown": "Não entendi. Tente: 'abertos por ubs', 'acima de 48h', 'tipos de defeito mais comuns'.", "table": None}
+
+
+# -------- status público da IA --------
 def ia_available() -> bool:
     return _has_openai()
