@@ -1,14 +1,3 @@
-Segue o OS800.py completo, já com:
-	•	Botão/aba “Pergunte com IA” usando answer_question + ia_available (fallback sem chave).
-	•	Badge de status da IA.
-	•	Atalho “Resumo IA dos dados atuais”.
-	•	Finalização por PROTOCOLO.
-	•	Priorização e filtro >48h úteis.
-	•	Relatórios 2.0 com export CSV/Excel.
-	•	Layout de login sem barra azul.
-
-Cole inteiro como OS800.py.
-
 # OS800.py — App completo (menu moderno + filtros + relatórios + NLQ IA com fallback)
 import os
 import logging
