@@ -330,3 +330,5 @@ def answer_question(chamados: list, question: str) -> Dict[str, Any]:
 
     # ---------- fallback ----------
     return {"ok": False, "markdown": "Não entendi. Tente reformular ou pergunte algo como: 'abertos por ubs', 'acima de 48h', 'tipos de defeito mais comuns'.", "table": None}
+    def ia_available() -> bool:
+        return _has_openai()
