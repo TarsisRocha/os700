@@ -521,7 +521,8 @@ def chamados_tecnicos_page():
                         "Limpeza e recalibração da impressora",
                         "Substituição de cartucho/toner",
                         "Verificação de conexão e drivers",
-                        "Reinicialização da impressora"
+                        "Reinicialização da impressora",
+                        "Placa em curto/Sem conserto",
                     ]
                 else:
                     solucao_options = [
