@@ -8,6 +8,9 @@ from twilio.rest import Client
 # Define o fuso de Fortaleza
 FORTALEZA_TZ = pytz.timezone("America/Fortaleza")
 
+# =======================================================
+# WhatsApp (Twilio)
+# =======================================================
 def send_whatsapp_message(message_body):
     """
     Envia a mensagem de WhatsApp para cada técnico listado na variável de ambiente
@@ -19,17 +22,20 @@ def send_whatsapp_message(message_body):
     technician_numbers = os.getenv("TECHNICIAN_WHATSAPP_NUMBER", "")
     
     if not all([account_sid, auth_token, from_whatsapp_number, technician_numbers]):
-        st.error("Variáveis de ambiente do Twilio não configuradas corretamente.")
+        # Evita quebrar o fluxo se as variáveis não estiverem definidas no ambiente
         return
     
-    # Separa os números (supondo que estejam separados por vírgula)
     numbers_list = [num.strip() for num in technician_numbers.split(",") if num.strip()]
     
+    try:
+        client = Client(account_sid, auth_token)
+    except Exception as e:
+        st.error(f"Erro ao iniciar cliente Twilio: {e}")
+        return
+
     for number in numbers_list:
-        # Garante que o número esteja no formato "whatsapp:+..."
         to_whatsapp_number = number if number.startswith("whatsapp:") else f"whatsapp:{number}"
         try:
-            client = Client(account_sid, auth_token)
             client.messages.create(
                 body=message_body,
                 from_=from_whatsapp_number,
@@ -38,15 +44,21 @@ def send_whatsapp_message(message_body):
         except Exception as e:
             st.error(f"Erro ao enviar mensagem para {to_whatsapp_number}: {e}")
 
+# =======================================================
+# Protocolo sequencial
+# =======================================================
 def gerar_protocolo_sequencial():
     try:
-        resp = supabase.table("chamados").select("protocolo", count="exact").execute()
-        protocolos = [item["protocolo"] for item in resp.data if item.get("protocolo") is not None]
-        return max(protocolos, default=0) + 1
+        resp = supabase.table("chamados").select("protocolo").execute()
+        protocolos = [int(item["protocolo"]) for item in resp.data if item.get("protocolo") not in (None, "")] if resp.data else []
+        return (max(protocolos) + 1) if protocolos else 1
     except Exception as e:
         st.error(f"Erro ao gerar protocolo: {e}")
         return None
 
+# =======================================================
+# Buscas básicas
+# =======================================================
 def get_chamado_by_protocolo(protocolo):
     try:
         resp = supabase.table("chamados").select("*").eq("protocolo", protocolo).execute()
@@ -73,17 +85,19 @@ def buscar_no_inventario_por_patrimonio(patrimonio):
         st.error(f"Erro ao buscar patrimônio: {e}")
         return None
 
+# =======================================================
+# Criação / atualização de chamado
+# =======================================================
 def add_chamado(username, ubs, setor, tipo_defeito, problema, machine=None, patrimonio=None):
     """
-    Cria um chamado no Supabase, definindo a hora de abertura com fuso horário de Fortaleza (UTC−3)
-    e envia uma mensagem via WhatsApp para os técnicos.
+    Cria um chamado no Supabase, definindo a hora de abertura em Fortaleza (UTC−3)
+    e — se possível — envia uma mensagem via WhatsApp para os técnicos.
     """
     try:
         protocolo = gerar_protocolo_sequencial()
         if protocolo is None:
             return None
 
-        # Gera horário local de Fortaleza
         hora_local = datetime.now(FORTALEZA_TZ).strftime('%d/%m/%Y %H:%M:%S')
 
         data = {
@@ -95,13 +109,20 @@ def add_chamado(username, ubs, setor, tipo_defeito, problema, machine=None, patr
             "hora_abertura": hora_local,
             "protocolo": protocolo,
             "machine": machine,
-            "patrimonio": patrimonio
+            "patrimonio": patrimonio,
+            # novos campos de status (opcionalmente nulos na criação)
+            "status_chamado": None,
+            "peca_necessaria": None,
+            "tecnico_responsavel": None,
         }
         supabase.table("chamados").insert(data).execute()
         
-        # Envio de mensagem via WhatsApp para os técnicos
-        message_body = f"Novo chamado aberto: Protocolo {protocolo}. UBS: {ubs}. Problema: {tipo_defeito}"
-        send_whatsapp_message(message_body)
+        # WhatsApp (não bloqueia o fluxo se falhar)
+        try:
+            message_body = f"Novo chamado aberto: Protocolo {protocolo}. UBS: {ubs}. Problema: {tipo_defeito}"
+            send_whatsapp_message(message_body)
+        except Exception:
+            pass
         
         st.success("Chamado aberto com sucesso!")
         return protocolo
@@ -109,25 +130,79 @@ def add_chamado(username, ubs, setor, tipo_defeito, problema, machine=None, patr
         st.error(f"Erro ao adicionar chamado: {e}")
         return None
 
+def atualizar_status_chamado(id_chamado, status_chamado=None, peca_necessaria=None, tecnico_responsavel=None):
+    """
+    Atualiza campos de status do chamado:
+      - status_chamado: ex. 'Aguardando Peça' (ou None para limpar)
+      - peca_necessaria: texto da peça (ou None)
+      - tecnico_responsavel: nome (ou None)
+
+    Se as colunas não existirem na tabela, mostre o SQL de criação no log/erro.
+    """
+    try:
+        payload = {
+            "status_chamado": status_chamado,
+            "peca_necessaria": peca_necessaria,
+            "tecnico_responsavel": tecnico_responsavel
+        }
+        supabase.table("chamados").update(payload).eq("id", id_chamado).execute()
+        return True
+    except Exception as e:
+        st.error(f"Erro ao atualizar status do chamado: {e}")
+        st.info("Se a tabela não possuir as colunas de status, crie com:")
+        st.code(
+            "ALTER TABLE public.chamados "
+            "ADD COLUMN IF NOT EXISTS status_chamado text, "
+            "ADD COLUMN IF NOT EXISTS peca_necessaria text, "
+            "ADD COLUMN IF NOT EXISTS tecnico_responsavel text;",
+            language="sql"
+        )
+        return False
+
+def marcar_aguardando_peca(id_chamado, peca=None, tecnico=None):
+    """
+    Atalho para marcar o chamado como 'Aguardando Peça'.
+    """
+    return atualizar_status_chamado(
+        id_chamado,
+        status_chamado="Aguardando Peça",
+        peca_necessaria=(peca or None),
+        tecnico_responsavel=(tecnico or None),
+    )
+
+def limpar_status_aguardando(id_chamado):
+    """
+    Remove status 'Aguardando Peça' (limpa os campos relacionados).
+    """
+    return atualizar_status_chamado(
+        id_chamado,
+        status_chamado=None,
+        peca_necessaria=None,
+        tecnico_responsavel=None,
+    )
+
 def finalizar_chamado(id_chamado, solucao, pecas_usadas=None):
     """
-    Finaliza um chamado, definindo a hora de fechamento com o fuso horário de Fortaleza (UTC−3).
+    Finaliza um chamado, definindo a hora de fechamento em Fortaleza (UTC−3).
     Também insere as peças usadas e registra histórico de manutenção.
+    Ao finalizar, limpamos status_chamado/peca_necessaria/tecnico_responsavel.
     """
     try:
         hora_fechamento_local = datetime.now(FORTALEZA_TZ).strftime('%d/%m/%Y %H:%M:%S')
 
         supabase.table("chamados").update({
             "solucao": solucao,
-            "hora_fechamento": hora_fechamento_local
+            "hora_fechamento": hora_fechamento_local,
+            "status_chamado": None,
+            "peca_necessaria": None,
+            "tecnico_responsavel": None,
         }).eq("id", id_chamado).execute()
         
-        # Se nenhuma entrada de peças for fornecida, pergunta ao usuário
+        # Entrada de peças (se na UI não veio nada, pode perguntar; mas por padrão vem da tela)
         if pecas_usadas is None:
             pecas_input = st.text_area("Informe as peças utilizadas (separadas por vírgula)")
             pecas_usadas = [p.strip() for p in pecas_input.split(",") if p.strip()] if pecas_input else []
         
-        # Se houver peças usadas, insere na tabela pecas_usadas e dá baixa no estoque
         if pecas_usadas:
             for peca in pecas_usadas:
                 supabase.table("pecas_usadas").insert({
@@ -135,14 +210,16 @@ def finalizar_chamado(id_chamado, solucao, pecas_usadas=None):
                     "peca_nome": peca,
                     "data_uso": hora_fechamento_local
                 }).execute()
-                from estoque import dar_baixa_estoque
-                dar_baixa_estoque(peca, quantidade_usada=1)
+                # baixa no estoque
+                try:
+                    from estoque import dar_baixa_estoque
+                    dar_baixa_estoque(peca, quantidade_usada=1)
+                except Exception:
+                    pass
         
+        # histórico por patrimônio (se houver)
         resp = supabase.table("chamados").select("patrimonio").eq("id", id_chamado).execute()
-        if resp.data and len(resp.data) > 0:
-            patrimonio = resp.data[0].get("patrimonio")
-        else:
-            patrimonio = None
+        patrimonio = resp.data[0].get("patrimonio") if (resp.data and len(resp.data) > 0) else None
 
         if patrimonio:
             descricao = f"Manutenção: {solucao}. Peças utilizadas: {', '.join(pecas_usadas) if pecas_usadas else 'Nenhuma'}."
@@ -156,13 +233,16 @@ def finalizar_chamado(id_chamado, solucao, pecas_usadas=None):
     except Exception as e:
         st.error(f"Erro ao finalizar chamado: {e}")
 
+# =======================================================
+# Listagens
+# =======================================================
 def list_chamados():
     """
     Retorna todos os chamados da tabela 'chamados'.
     """
     try:
         resp = supabase.table("chamados").select("*").execute()
-        return resp.data
+        return resp.data or []
     except Exception as e:
         st.error(f"Erro ao listar chamados: {e}")
         return []
@@ -173,7 +253,7 @@ def list_chamados_em_aberto():
     """
     try:
         resp = supabase.table("chamados").select("*").is_("hora_fechamento", None).execute()
-        return resp.data
+        return resp.data or []
     except Exception as e:
         st.error(f"Erro ao listar chamados abertos: {e}")
         return []
@@ -189,6 +269,9 @@ def get_chamados_por_patrimonio(patrimonio):
         st.error(f"Erro ao buscar chamados para o patrimônio {patrimonio}: {e}")
         return []
 
+# =======================================================
+# Horas úteis
+# =======================================================
 def calculate_working_hours(start, end):
     """
     Calcula o tempo útil entre 'start' e 'end', considerando o expediente:
@@ -204,15 +287,15 @@ def calculate_working_hours(start, end):
     current = start
 
     while current < end:
-        # Se for sábado (5) ou domingo (6), pula para o próximo dia
+        # Sábado (5) ou domingo (6): pula para o próximo dia
         if current.weekday() >= 5:
             current = datetime.combine(current.date() + timedelta(days=1), datetime.min.time())
             continue
 
         morning_start = current.replace(hour=8, minute=0, second=0, microsecond=0)
-        morning_end = current.replace(hour=12, minute=0, second=0, microsecond=0)
+        morning_end   = current.replace(hour=12, minute=0, second=0, microsecond=0)
         afternoon_start = current.replace(hour=13, minute=0, second=0, microsecond=0)
-        afternoon_end = current.replace(hour=17, minute=0, second=0, microsecond=0)
+        afternoon_end   = current.replace(hour=17, minute=0, second=0, microsecond=0)
 
         if end > morning_start:
             interval_start = max(current, morning_start)
@@ -230,6 +313,9 @@ def calculate_working_hours(start, end):
     
     return timedelta(seconds=total_seconds)
 
+# =======================================================
+# Reabrir chamado
+# =======================================================
 def reabrir_chamado(id_chamado, remover_historico=False):
     """
     Reabre um chamado que foi finalizado, removendo hora_fechamento e solucao.
@@ -237,14 +323,12 @@ def reabrir_chamado(id_chamado, remover_historico=False):
     referente à data de fechamento anterior (se quiser).
     """
     try:
-        # 1) Busca dados do chamado
         resp = supabase.table("chamados").select("*").eq("id", id_chamado).execute()
         if not resp.data:
             st.error("Chamado não encontrado.")
             return
         chamado = resp.data[0]
 
-        # Verifica se realmente está fechado
         if not chamado.get("hora_fechamento"):
             st.info("Chamado já está em aberto.")
             return
@@ -252,14 +336,11 @@ def reabrir_chamado(id_chamado, remover_historico=False):
         old_hora_fechamento = chamado["hora_fechamento"]
         patrimonio = chamado.get("patrimonio")
 
-        # 2) Atualiza hora_fechamento e solucao para None
         supabase.table("chamados").update({
             "hora_fechamento": None,
             "solucao": None
         }).eq("id", id_chamado).execute()
 
-        # 3) Se remover_historico=True, remove o registro no historico_manutencao
-        # que tenha data_manutencao == old_hora_fechamento (caso tenha sido criado ao finalizar)
         if remover_historico and patrimonio and old_hora_fechamento:
             supabase.table("historico_manutencao").delete() \
                 .eq("numero_patrimonio", patrimonio) \
@@ -269,4 +350,3 @@ def reabrir_chamado(id_chamado, remover_historico=False):
         st.success(f"Chamado {id_chamado} reaberto com sucesso!")
     except Exception as e:
         st.error(f"Erro ao reabrir chamado: {e}")
-
